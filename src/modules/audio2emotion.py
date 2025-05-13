@@ -1,7 +1,4 @@
-import os
-import sys
 import torch.nn as nn
-sys.path.append(os.path.dirname(os.path.abspath("../")))
 
 class Audio2EmotionModel(nn.Module):
     def __init__(self, num_classifier_layers=5, num_classifier_channels=2048, num_emotion_classes=8):

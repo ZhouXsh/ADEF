@@ -26,14 +26,12 @@ emo_label = ['ang',  'con',  'dis',  'fea',  'hap',  'neu',  'sad',  'sur']
 def accuracy(preds, labels):
     return (preds.argmax(dim=1) == labels).float().mean().item()
 
-dates = '0430'
-
-def transf_train(devices=1):
+def train(devices=1):
     # 训练超参数
     num_epochs = 50000
     learning_rate = 1e-4
 
-    log_dir = f'./logs_motion2emolevel_Transf_{num_epochs}_{dates}_所有视频同分布_高dim'
+    log_dir = f'experiments/emo_classifier/'
     
     writer = SummaryWriter(log_dir)   # 路径
 
@@ -116,7 +114,7 @@ def transf_train(devices=1):
             print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {total_loss.item():.6f}, ACC: {acc_emo:.6f} + {acc_level:.6f}")
 
     # print("训练完成！")
-    save_dir = f"{log_dir}/transf_motion2emolevel_{num_epochs}_{dates}.pth"
+    save_dir = f"{log_dir}/ckpt.pth"
     torch.save(model.state_dict(), save_dir)
 
 # 评估
@@ -124,7 +122,7 @@ def transf_train(devices=1):
 def eval():
     device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
     transf_model = EmotionTransformer().to(device)
-    transf_model.load_state_dict(torch.load('/mnt/disk2/zhouxishi/ADEF/pretrained_weights/ADEF/emo_classifier/emo_level_classifier.pth'))
+    transf_model.load_state_dict(torch.load('pretrained_weights/ADEF/emo_classifier/emo_level_classifier.pth'))
     transf_model.eval()
 
     eval_dataset = Motion2Emo_Dataset()
@@ -147,5 +145,5 @@ def eval():
     return None
 
 if __name__ == '__main__':
-    # transf_train()
-    eval()
+    train()
+    # eval()

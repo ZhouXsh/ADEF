@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 def accuracy(preds, labels):
     return (preds.argmax(dim=1) == labels).float().mean().item()
 
-def main():
+def train():
     device = torch.device('cuda:1' if torch.cuda.is_available() else 'cpu')
     num_epochs = 100000
     batch_size = 64
@@ -28,8 +28,8 @@ def main():
     criterion = nn.CrossEntropyLoss()
 
     # 初始化 TensorBoard 写入器
-    log_dir=f'experiments/audio2emo/'
-    writer = SummaryWriter(log_dir=log_dir)
+    log_dir=f'experiments/audio2emotion/'
+    writer = SummaryWriter(log_dir)
 
     for epoch in range(num_epochs):
         vecs, labels = next(data_loader)
@@ -51,7 +51,7 @@ def main():
             print(f"Epoch {epoch + 1}, Loss: {loss:.4f}, acc: {acc:.4f}")
 
     writer.close()
-    save_dir = f"{log_dir}/audio2emotion_{num_epochs}_lr{lr}_b{batch_size}.pth"
+    save_dir = f"{log_dir}/ckpt.pth"
     torch.save(model.state_dict(), save_dir)
 
 def eval():
@@ -78,5 +78,5 @@ def eval():
     print(f"{acc} / {num} = {acc/num}")  # 520.484375 / 521 = 0.9990
 
 if __name__ == "__main__":
-    # main()
-    eval()
+    train()
+    # eval()

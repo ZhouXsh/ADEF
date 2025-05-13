@@ -1,13 +1,8 @@
-import sys
 import torch
 import torch.nn as nn
-import os
-sys.path.append(os.path.dirname(os.path.abspath("../")))
 from src.modules.common import PositionalEncoding
 
 torch.backends.cudnn.benchmark = True # disable CUDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR warning
-
-import cv2; cv2.setNumThreads(0); cv2.ocl.setUseOpenCL(False)
 
 class EmotionTransformer(nn.Module):
     def __init__(self, input_dim=63, embed_dim=512, num_heads=8, ff_dim=4*512, num_layers=8, num_classes=8, level_classes=3):

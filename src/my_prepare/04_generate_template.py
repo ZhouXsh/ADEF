@@ -163,7 +163,7 @@ def all_cal(data_root, emo_index=0):
 Emotion_template = {}
 for i in range(8):
     Emotion_template[i] = all_cal(emo_index=i)
-pickle.dump(Emotion_template, open(f"front_all_motions_template.pkl", 'wb'))
+pickle.dump(Emotion_template, open(f"emotion_template.pkl", 'wb'))
 # # 将计算出的统计信息打包并保存到 front_all_motion_template.pkl，供后续训练或分析使用。
 
 
@@ -320,4 +320,4 @@ def all_same_cal(data_root):
     return motion_template
 
 same_template = all_same_cal(f'front_all_motions.pkl')
-pickle.dump(same_template, open(f"joyvasa_motion_template.pkl", 'wb'))
+pickle.dump(same_template, open(f"motion_template.pkl", 'wb'))

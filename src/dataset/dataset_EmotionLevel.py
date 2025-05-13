@@ -21,16 +21,15 @@ warnings.filterwarnings('ignore', message='PySoundFile failed. Trying audioread 
 
 class EmoLevelDataset(data.Dataset):
     def __init__(self, 
-                 root_dir,                                        # 'prepare_data/'  数据集根目录
-                 motion_filename="talking_face.pkl",              # 运动文件  'motions.pkl'
-                 motion_template_filename="front_all_Emotion_template.pkl",   # 情感模板文件
+                 root_dir='src/my_prepare/',                                        # 'prepare_data/'  数据集根目录
+                 motion_filename="front_all_motions.pkl",              # 运动文件  'motions.pkl'
+                 motion_template_filename="motion_template.pkl",   # 情感模板文件
                  split="train", 
                  coef_fps=25, 
                  n_motions=100, 
                  crop_strategy="random", 
                  normalize_type="mix"): 
         self.template_dir = os.path.join(root_dir, motion_template_filename)  # prepare_data/motion_template.pkl
-        print(self.template_dir)        # src/prepare_data/motion_template.pkl
         self.template_dict = pickle.load(open(self.template_dir, 'rb'))
         self.motion_dir = os.path.join(root_dir, motion_filename)     # prepare_data/motions.pkl
         self.eps = 1e-9
@@ -39,7 +38,7 @@ class EmoLevelDataset(data.Dataset):
         if split == "train":
             self.root_dir = os.path.join(root_dir, "all_train.txt")  #  prepare_data/train.json
         else:
-            self.root_dir = os.path.join(root_dir, "front_test.txt")  #  prepare_data/test.json
+            self.root_dir = os.path.join(root_dir, "all_test.txt")  #  prepare_data/test.json
 
         # txt读取 
         with open(self.root_dir, "r", encoding="utf-8") as file:
@@ -69,13 +68,6 @@ class EmoLevelDataset(data.Dataset):
         return len(self.all_data)
     
     def check_motion_length(self, motion_data, min_frames):
-        # motion_data = {
-        #     'n_frames': n_frames,         # 总帧数
-        #     'output_fps': kwargs.get('output_fps', 25),
-        #     'motion': [],
-        #     'c_eyes_lst': [],
-        #     'c_lip_lst': [],
-        # }
         exp_list, t_list, scale_list, pitch_list, yaw_list, roll_list = [], [], [], [], [], []
         for frame_index in range(min_frames):
             exp_list.append(motion_data["motion"][frame_index]["exp"])
@@ -133,30 +125,16 @@ class EmoLevelDataset(data.Dataset):
         while not has_valid_audio:
             # read motion  读取运动系数
             metadata = self.all_data[index]   # 获取第index个视频对应的三文件：视频
-            # metadata={
-            #     "video_name": video_name,
-            #     "audio_name": audio_name,
-            #     "motion_name": motion_name,
-            # }
 
-### 新增：情感标签的索引映射 ###   zxs 20250314
 # "video_name": "/mnt/disk2/zhouxishi/JoyVASA/single_video/M003_down_angry_level_1_001.mp4",
             emotype = metadata['video_name'].split('/')[-1].split('_')[2]
             emo_index = torch.tensor(emo_list.index(emotype))    # emo对应的索引值   
 
-### 新增：情感增强 返回情感等级   zxs 20250419
             emolevel = int(metadata['video_name'].split('/')[-1].split('_')[4])-1   # 1~3 -> 0~2
             emo_level = torch.tensor(emolevel)    # emo对应的索引值     
 
             # 加载 motion
             motion_data = self.motion_data[metadata["audio_name"]]   # 单个视频的 运动系数字典motion_data
-            # motion_data = {
-            #     'n_frames': n_frames,         # 总帧数
-            #     'output_fps': kwargs.get('output_fps', 25),
-            #     'motion': [],
-            #     'c_eyes_lst': [],
-            #     'c_lip_lst': [],
-            # }
 
             # load audio & normalize  加载音频并标准化
             audio_path = metadata["audio_name"]
@@ -168,7 +146,6 @@ class EmoLevelDataset(data.Dataset):
             audio_frames = int(audio_clip.shape[0] / self.audio_unit)   # 计算音频对应的帧数
             motion_frames = motion_data["n_frames"]
             min_frames = min(audio_frames, motion_frames)   # 取最小帧数，避免不匹配
-            # print(f"min_frames: {min_frames}, audio_frames: {audio_frames}, motion_frames: {motion_frames}")
 
             # 根据最小帧 对motion进行裁剪+填充
             motion_data = self.check_motion_length(motion_data, min_frames)  # min_frames *2*2  > self.coef_total_len

@@ -8,8 +8,6 @@ sys.path.append(os.path.dirname(os.path.abspath("../")))
 
 torch.backends.cudnn.benchmark = True # disable CUDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR warning
 
-import cv2; cv2.setNumThreads(0); cv2.ocl.setUseOpenCL(False)
-
 def partial_fields(target_class, kwargs):
     return target_class(**{k: v for k, v in kwargs.items() if hasattr(target_class, k)})
 
@@ -17,7 +15,7 @@ emo_list = ['angry', 'contempt', 'disgusted', 'fear', 'happy', 'neutral', 'sad',
 emo_label = ['ang',  'con',  'dis',  'fea',  'hap',  'neu',  'sad',  'sur']
 
 class Motion2Emo_Dataset(data.Dataset):
-    def __init__(self, root_dir='/mnt/disk2/zhouxishi/JoyVASA/src/my_prepare', gt_motion_filename="front_all_motions.pkl", motion_template_filename="joyvasa_motion_template.pkl", train_dataset="all_train.txt"):
+    def __init__(self, root_dir='src/my_prepare', gt_motion_filename="front_all_motions.pkl", motion_template_filename="joyvasa_motion_template.pkl", train_dataset="all_train.txt"):
         self.template_dict = pickle.load(open(os.path.join(root_dir, motion_template_filename), 'rb'))
         self.gt_motion_data = pickle.load(open(os.path.join(root_dir, gt_motion_filename), "rb"))
         print("load all motion data done...")

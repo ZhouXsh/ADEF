@@ -45,7 +45,7 @@ def transf_train():
     decay_iter = 120000
     batch_size = 64
     # 同分布
-    log_dir = f'./0511_64_120000_gt15增强'
+    log_dir = f'experiments/emo_enhancer/'
     
     writer = SummaryWriter(log_dir)   # 路径
 
@@ -55,7 +55,7 @@ def transf_train():
 
     # 0417 情感分类器    0426高dim且同分布
     emo_classifier = Classifier().to(device)
-    emo_classifier.load_state_dict(torch.load(f'/mnt/disk2/zhouxishi/JoyVASA/pretrained_weights/ADEF/emo_classifier/emo_level_classifier.pth', map_location=device))
+    emo_classifier.load_state_dict(torch.load(f'pretrained_weights/ADEF/emo_classifier/emo_level_classifier.pth', map_location=device))
     emo_classifier.eval()
     criterion = torch.nn.CrossEntropyLoss()
 
@@ -79,19 +79,17 @@ def transf_train():
     }
 
     for epoch in range(num_epochs):
-        dit_prev, _, gt_prev, _, emo_index, emo_level = next(train_loader)
+        dit_prev, gt_prev, emo_index, emo_level = next(train_loader)
         dit_prev = dit_prev.to(device)     # （B,100,63）
-        # dit_cur = dit_cur.to(device)      # （B,100,63）
         emo_index = emo_index.to(device)     # （B,）
         gt_prev = gt_prev.to(device)       # （B,100,63）
-        # gt_cur = gt_cur.to(device)       # （B,100,63）
         emo_level = emo_level.to(device)
 
         optimizer.zero_grad()
 
         pred = model(dit_prev, emo_index, emo_level)     #   (B, 1, 63)
 
-        B, L, _ = dit_prev.shape
+        _, L, _ = dit_prev.shape
         dit_prev = dit_prev + pred.expand(-1, L, -1)   # (B, 1, 63)  -> (B, L, 63)
 
         # === 计算各个损失 ===
@@ -155,7 +153,7 @@ def infer(emo_le = 2):
     device = adef_wrapper.device          # cuda:0
 
     transf_model = EmotionTransformer().to(device)
-    enhancer_p = '/mnt/disk2/zhouxishi/ADEF/pretrained_weights/ADEF/emo_enhancer/emo_enhancer.pth'
+    enhancer_p = 'pretrained_weights/ADEF/emo_enhancer/emo_enhancer.pth'
     transf_model_data = torch.load(enhancer_p, map_location=device)
     transf_model.load_state_dict(transf_model_data, strict=False)   # ['model']
     transf_model.eval()
@@ -302,5 +300,5 @@ def infer(emo_le = 2):
     return None
 
 if __name__ == "__main__":
-    # transf_train()
-    infer()
+    transf_train()
+    # infer()

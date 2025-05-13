@@ -15,14 +15,14 @@ emo_label = ['ang',  'con',  'dis',  'fea',  'hap',  'neu',  'sad',  'sur']
 
 # 同分布
 class DiT_Emo_Dataset(data.Dataset):
-    def __init__(self, root_dir='/mnt/disk2/zhouxishi/JoyVASA/src/prepare_data', gt_motion_filename="front_motions.pkl", dit_motion_filename="front_dit_motions.pkl"):
-        self.template_dict = pickle.load(open('/mnt/disk2/zhouxishi/JoyVASA/src/my_prepare/joyvasa_motion_template.pkl', 'rb'))
+    def __init__(self, root_dir='src/my_prepare', gt_motion_filename="front_all_motions.pkl", dit_motion_filename="front_dit_motions.pkl"):
+        self.template_dict = pickle.load(open(os.path.join(root_dir, 'motion_template.pkl'), 'rb'))
         self.gt_motion_data = pickle.load(open(os.path.join(root_dir, gt_motion_filename), "rb"))
         self.dit_motion_data = pickle.load(open(os.path.join(root_dir, dit_motion_filename), "rb"))
         print("load all motion data done...")
         self.eps = 1e-9
         
-        txt_path = os.path.join(root_dir, "front_train.txt")
+        txt_path = os.path.join(root_dir, "all_train.txt")
         with open(txt_path, "r", encoding="utf-8") as file:
             lines = [line.strip() for line in file.readlines()]
             self.all_data = [{
@@ -46,7 +46,9 @@ class DiT_Emo_Dataset(data.Dataset):
         template_dict = self.template_dict         # 同分布
 
         gt_motions = self.gt_motion_data[metadata["audio_name"]]
-        dit_motions = self.dit_motion_data[metadata["audio_name"]]
+        dit_name = metadata["audio_name"].replace('/mnt/disk2/zhouxishi/JoyVASA/dataset/MEAD11/videos', '/mnt/disk2/zhouxishi/JoyVASA/dataset/MEAD25/raw_videos')
+        dit_motions = self.dit_motion_data[dit_name]
+        # dit_motions = self.dit_motion_data[metadata["audio_name"]]
 
         min_frames = min(gt_motions['n_frames'], dit_motions['n_frames'])
         

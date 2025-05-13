@@ -1,12 +1,7 @@
-import sys
-
 import torch
 import torch.nn as nn
-import os
-sys.path.append(os.path.dirname(os.path.abspath("../")))
 from src.modules.common import PositionalEncoding
 torch.backends.cudnn.benchmark = True # disable CUDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR warning
-import cv2; cv2.setNumThreads(0); cv2.ocl.setUseOpenCL(False)
 
 def partial_fields(target_class, kwargs):
     return target_class(**{k: v for k, v in kwargs.items() if hasattr(target_class, k)})

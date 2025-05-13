@@ -22,34 +22,22 @@ device_id = 2  # 选择 GPU
 torch.cuda.set_device(device_id)  # 设置默认 GPU
 device = torch.device(f"cuda:{device_id}" if torch.cuda.is_available() else "cpu")  # 显式指定设备
 
-g_exp_name = '0511_allevel_150000'  # 实验名称
+g_exp_name = 'emo_dit'  # 实验名称
 
 g_data_root = "src/my_prepare/"
-# g_motion_filename = 'front_level3_motions.pkl'
-# g_motion_template_filename = 'front_level3_motions_template.pkl'
-# g_motion_filename = 'front_all_motions.pkl'
-# g_motion_template_filename = 'front_all_motions_template.pkl'
-g_motion_filename = 'front_all_motions.pkl'    # front_all_motions
-g_motion_template_filename = 'joyvasa_motion_template.pkl'
-# g_motion_template_filename = 'front_all_motions_template.pkl'
+g_motion_filename = 'front_all_motions.pkl' 
+g_motion_template_filename = 'motion_template.pkl'
 
 g_batch_size = 32
 g_guiding_conditions = 'audio,emotion'   # 'audio,'
-g_max_iter = 150000
+g_max_iter = 100000
 g_lr = 1e-4
 g_scheduler = 'WarmupThenDecay'   # 'None', 'Warmup', 'WarmupThenDecay'
-g_warm_iter = 15000
-g_cos_max_iter = 150000
-
-'''
-WarmupThenDecay:
-WarmupThenDecay_复现_b32_f25_80000_dim512_Finalv2
-
-dim改成512                 zxs20250328
-'''
+g_warm_iter = 10000
+g_cos_max_iter = 100000
 
 classifier = Classifier().to(device)
-classifier.load_state_dict(torch.load(f'/mnt/disk2/zhouxishi/JoyVASA/src/modules/logs_motion2emolevel_Transf_50000_0429_所有视频同分布_高dim/transf_motion2emolevel_50000_0429.pth', map_location=device), strict=False)
+classifier.load_state_dict(torch.load(f'pretrained_weights/ADEF/emo_classifier/emo_level_classifier.pth', map_location=device), strict=False)
 classifier.eval()
 
 criterion = torch.nn.CrossEntropyLoss()
@@ -64,9 +52,9 @@ def train(args, model, train_loader, val_loader, optimizer, save_dir, scheduler=
     model.train()
 
 ############
-    all_temp = pickle.load(open('/mnt/disk2/zhouxishi/JoyVASA/src/my_prepare/joyvasa_motion_template.pkl','rb'))
+    all_temp = pickle.load(open('pretrained_weights/ADEF/motion_template/motion_template.pkl','rb'))
     mean_exp, std_exp = torch.tensor(all_temp['mean_exp']).to(device), torch.tensor(all_temp['std_exp']).to(device)
-    alone_temp = pickle.load(open('/mnt/disk2/zhouxishi/JoyVASA/src/my_prepare/front_all_motions_template.pkl','rb'))
+    alone_temp = pickle.load(open('pretrained_weights/ADEF/motion_template/emotion_template.pkl','rb'))
     mean_exps, std_exps = [], []
     for i in range(len(alone_temp)):
         mean_exps.append(torch.tensor(alone_temp[i]['mean_exp']))
@@ -477,7 +465,7 @@ def main(args, option_text=None):
 
     model = DitTalkingHead(**model_kwargs)             # 音频2运动扩散模型
 
-    exp_dir = Path('experiments/ADEF_v3') / f'{args.exp_name}'     # experiments/JoyVASA/test_b16
+    exp_dir = Path('experiments/ADEF') / f'{args.exp_name}'     # experiments/JoyVASA/test_b16
     ckpt_dir = exp_dir / 'checkpoints'         # experiments/JoyVASA/test_b16/checkpoints
     pt_files = list(ckpt_dir.glob('*.pt'))
     start_iter = 0
