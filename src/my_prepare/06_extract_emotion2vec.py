@@ -91,5 +91,5 @@ def save2dict():
 
     print("运动数据处理完成")
 
-# front_all()   # 29709
-# save2dict()  # 29709
+front_all()   # 29709
+save2dict()  # 29709
