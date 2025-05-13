@@ -6,7 +6,7 @@ Pipeline of LivePortrait with Audio-Driven Motion Generation (Human)
 """
 
 import numpy as np
-from src.modules.audio2emotion import AudioEmotionClassifierModel
+from src.modules.audio2emotion import Audio2EmotionModel
 import torch
 
 torch.backends.cudnn.benchmark = True # disable CUDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR warning
@@ -129,7 +129,7 @@ class LivePortraitPipeline(object):
                 model.generate(args.audio, output_dir=os.path.dirname(args.audio), granularity="utterance", extract_embedding=True)
             emo_vec = torch.tensor(np.load(np_path)).unsqueeze(0).to(device)  # [1, 1024]
 
-            a2e_model = AudioEmotionClassifierModel().to(device)
+            a2e_model = Audio2EmotionModel().to(device)
             dict = torch.load('/mnt/disk2/zhouxishi/ADEF/pretrained_weights/ADEF/audio2emo/audio2emo.pth',map_location=device)
             a2e_model.load_state_dict(dict)
             a2e_model.eval()

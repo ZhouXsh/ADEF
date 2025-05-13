@@ -23,9 +23,9 @@ def load_lip_array():
 class InferenceConfig(PrintableConfig):
     # MOTION SEQUENCE GENERATOR           运动序列生成器（音频toMotion） 相关权重
 
-    checkpoint_MotionGenerator: str = make_abs_path("../../pretrained_weights/ADEF/motion_generator/iter_0100000.pt")
+    checkpoint_MotionGenerator: str = make_abs_path("../../pretrained_weights/ADEF/motion_generator/emo_dit_100000.pt")
     checkpoint_AudioEncoder: str = make_abs_path("../../pretrained_weights/hubert-base-ls960/")
-    motion_template_path: str = make_abs_path("../../pretrained_weights/ADEF/motion_template/front_all_motion_template.pkl")
+    motion_template_path: str = make_abs_path("../../pretrained_weights/ADEF/motion_template/motion_template.pkl")  # emotion_template
 
     # HUMAN MODEL CONFIG, NOT EXPORTED PARAMS   人体模型配置，未导出参数      相关权重
     models_config: str = make_abs_path('./models.yaml')  # portrait animation config  肖像动画配置

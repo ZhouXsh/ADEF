@@ -85,10 +85,7 @@ class ADEFWrapper(object):
         self.n_audio_samples = round(self.audio_unit * self.n_motions)
         self.pad_mode = self.motion_generator_args.pad_mode
         self.use_indicator = self.motion_generator_args.use_indicator
-        # self.templete_dict = pickle.load(open('/mnt/disk2/zhouxishi/JoyVASA/src/my_prepare/front_all_motions_template.pkl', 'rb'))
-
-        # #### 0425统一template
-        self.templete_dict = pickle.load(open('/mnt/disk2/zhouxishi/JoyVASA/src/my_prepare/joyvasa_motion_template.pkl', 'rb'))
+        self.templete_dict = pickle.load(open(inference_cfg.motion_template_path, 'rb'))
 
         # #### 0420情感增强
         self.emo_ehance = inference_cfg.use_emo_enhancer
@@ -101,7 +98,6 @@ class ADEFWrapper(object):
             transf_model.to(self.device)
             self.emo_enhancer = transf_model
             log(f'load enhancer_p from {enhancer_p}')
-
 
     # 获取推理上下文
     def inference_ctx(self):
