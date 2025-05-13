@@ -173,9 +173,6 @@ data/
 pretrained_weights/
 experiments/
 
-# MEAD完整数据
-dataset/
-
 # MEAD部分，用于训练部分代码的测试
 single_video/
 
