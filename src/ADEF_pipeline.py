@@ -98,7 +98,7 @@ def smooth_driving_template_cosine(left_frame, right_frame, driving_template_dct
         driving_template_dct[frame_id]['exp'] = y_fit[i].reshape(1, 21, 3)
 
 
-class LivePortraitPipeline(object):
+class ADEFPipeline(object):
     def __init__(self, inference_cfg: InferenceConfig, crop_cfg: CropConfig):
         self.adef_wrapper: ADEFWrapper = ADEFWrapper(inference_cfg=inference_cfg)       # 核心功能包装器
         self.cropper: Cropper = Cropper(crop_cfg=crop_cfg)                        # 裁剪器

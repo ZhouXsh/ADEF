@@ -50,8 +50,8 @@ def main():
     crop_cfg = partial_fields(CropConfig, args.__dict__)
 
     # init pipeline
-    from src.ADEF_pipeline import LivePortraitPipeline
-    pipeline = LivePortraitPipeline(
+    from src.ADEF_pipeline import ADEFPipeline
+    pipeline = ADEFPipeline(
         inference_cfg=inference_cfg,          # 推理配置
         crop_cfg=crop_cfg                     # 裁剪（视频or图片）的配置
     )

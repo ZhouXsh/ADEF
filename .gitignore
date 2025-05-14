@@ -185,3 +185,5 @@ single_video/
 src/my_prepare/*.pkl
 
 src/my_prepare/*.txt
+
+train-bak.py

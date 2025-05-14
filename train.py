@@ -22,20 +22,6 @@ device_id = 2  # 选择 GPU
 torch.cuda.set_device(device_id)  # 设置默认 GPU
 device = torch.device(f"cuda:{device_id}" if torch.cuda.is_available() else "cpu")  # 显式指定设备
 
-g_exp_name = 'emo_dit'  # 实验名称
-
-g_data_root = "src/my_prepare/"
-g_motion_filename = 'front_all_motions.pkl' 
-g_motion_template_filename = 'motion_template.pkl'
-
-g_batch_size = 32
-g_guiding_conditions = 'audio,emotion'   # 'audio,'
-g_max_iter = 100000
-g_lr = 1e-4
-g_scheduler = 'WarmupThenDecay'   # 'None', 'Warmup', 'WarmupThenDecay'
-g_warm_iter = 10000
-g_cos_max_iter = 100000
-
 classifier = Classifier().to(device)
 classifier.load_state_dict(torch.load(f'pretrained_weights/ADEF/emo_classifier/emo_level_classifier.pth', map_location=device), strict=False)
 classifier.eval()
@@ -53,7 +39,7 @@ def train(args, model, train_loader, val_loader, optimizer, save_dir, scheduler=
 
 ############
     all_temp = pickle.load(open('pretrained_weights/ADEF/motion_template/motion_template.pkl','rb'))
-    mean_exp, std_exp = torch.tensor(all_temp['mean_exp']).to(device), torch.tensor(all_temp['std_exp']).to(device)
+    mean_exp, std_exp = torch.tensor(all_temp['mean_exp']).to(device).unsqueeze(0).unsqueeze(0), torch.tensor(all_temp['std_exp']).to(device).unsqueeze(0).unsqueeze(0)
     alone_temp = pickle.load(open('pretrained_weights/ADEF/motion_template/emotion_template.pkl','rb'))
     mean_exps, std_exps = [], []
     for i in range(len(alone_temp)):
@@ -63,7 +49,6 @@ def train(args, model, train_loader, val_loader, optimizer, save_dir, scheduler=
     std_exps = torch.stack(std_exps,dim=0).to(device)     # [8, 63]
 #############
 
-    # data
     data_loader = infinite_data_loader(train_loader)   # 将数据加载器（train_loader）转换为一个无限循环的迭代器
     audio_unit = train_loader.dataset.audio_unit       # 每一帧的样本数  self.audio_unit = 16000. / self.coef_fps
     predict_head_pose = not args.no_head_pose          # False -> True  预测头部姿势
@@ -71,8 +56,6 @@ def train(args, model, train_loader, val_loader, optimizer, save_dir, scheduler=
 
     optimizer.zero_grad()
     for it in range(start_iter, args.max_iter + 1):   # 迭代次数  0 ~ 50000
-        # print(f'第{it}次迭代开始~！！！！！！！！！！！')
-        # Load data
         audio_pair, coef_pair, emo_index, _ = next(data_loader)  # 音频(N=8, 100帧的采样数)*2 及其运动系数{'exp':[(8, 100, 63)],'pose':[(8, 100, 7)]} *2  
         audio_pair = [audio.to(device) for audio in audio_pair]
         coef_pair = [{x: coef_pair[i][x].to(device) for x in coef_pair[i]} for i in range(2)]  # 每一种系数（旋转、表情等）都放入device
@@ -157,12 +140,11 @@ def train(args, model, train_loader, val_loader, optimizer, save_dir, scheduler=
             alone_mean = mean_exps[emo_index].unsqueeze(1)        # (N,1,63)
             alone_std = std_exps[emo_index].unsqueeze(1)          # (N,1,63)
 
-            # exps = (exps * alone_std + alone_mean - mean_exp) / (std_exp + 1e-9)             # 反归一化 再 归一化
-            exps = (exps * alone_std + alone_mean - mean_exp.unsqueeze(0).unsqueeze(0)) / (std_exp.unsqueeze(0).unsqueeze(0) + 1e-9)             # 反归一化 再 归一化
+            exps = (exps * alone_std + alone_mean - mean_exp) / (std_exp + 1e-9)             # 反归一化 再 归一化
 
 ###########################
-            pred, _ = classifier(exps)   # (N,100,63)  -> (N,8)
-            loss_e = criterion(pred, emo_index)
+            pred_emo, _ = classifier(exps)   # (N,100,63)  -> (N,8)
+            loss_e = criterion(pred_emo, emo_index)
             loss_emo = loss_emo + loss_e / 2
 
             loss_noise = loss_noise + loss_n / 2        # 前n_motions和后n_motions各占一半，因此除以2。下同
@@ -272,7 +254,7 @@ def train(args, model, train_loader, val_loader, optimizer, save_dir, scheduler=
                 'iter': it,                    # 训练轮次
             }, save_dir / f'iter_{it:07}.pt')   # experiments/JoyVASA/test_b16/checkpoints/iter_{it:07}.pt
 
-        # validation  验证模型（跑完一轮验证一次）
+        # validation  验证模型
         # if (it % args.val_iter == 0 or it == 0) or it == args.max_iter:  # 每50次迭代 验证一次。 第0次和第50000次 验证一次
         #     val(args, model, val_loader, it, 1, 'val', writer)
 
@@ -465,7 +447,7 @@ def main(args, option_text=None):
 
     model = DitTalkingHead(**model_kwargs)             # 音频2运动扩散模型
 
-    exp_dir = Path('experiments/ADEF') / f'{args.exp_name}'     # experiments/JoyVASA/test_b16
+    exp_dir = Path('experiments/emo_dit') / f'{args.exp_name}'     # experiments/JoyVASA/test_b16
     ckpt_dir = exp_dir / 'checkpoints'         # experiments/JoyVASA/test_b16/checkpoints
     pt_files = list(ckpt_dir.glob('*.pt'))
     start_iter = 0
@@ -544,20 +526,20 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--mode', type=str, default='train', choices=['train', 'test'])
     parser.add_argument('--iter', type=int, default=1, help='iteration to test')
-    parser.add_argument('--exp_name', type=str, default=g_exp_name, help='experiment name')
+    parser.add_argument('--exp_name', type=str, default='emo_dit', help='experiment name')
 
     # Dataset
-    parser.add_argument('--data_root', type=Path, default=g_data_root,)
-    parser.add_argument('--motion_filename', type=str, default=g_motion_filename)             # templates
-    parser.add_argument('--motion_template_filename', type=str, default=g_motion_template_filename)     # motion_template
-    parser.add_argument('--batch_size', type=int, default=g_batch_size, help='batch size')
+    parser.add_argument('--data_root', type=Path, default="src/my_prepare/",)
+    parser.add_argument('--motion_filename', type=str, default='front_all_motions.pkl')             # templates
+    parser.add_argument('--motion_template_filename', type=str, default='motion_template.pkl')     # motion_template
+    parser.add_argument('--batch_size', type=int, default=32, help='batch size')
     parser.add_argument('--num_workers', type=int, default=4, help='number of workers for dataloader')
     parser.add_argument('--crop_strategy', type=str, default="random")
     parser.add_argument('--normalize_type', type=str, default="mix", choices=["std", "case", "scale", "minmax", "mix"])
 
     # Model
     parser.add_argument('--target', type=str, default='sample', choices=['sample', 'noise'])
-    parser.add_argument('--guiding_conditions', type=str, default=g_guiding_conditions)
+    parser.add_argument('--guiding_conditions', type=str, default='audio,emotion')
     parser.add_argument('--cfg_mode', type=str, default='incremental', choices=['incremental', 'independent'])
     parser.add_argument('--n_diff_steps', type=int, default=50, help='number of diffusion steps')
     parser.add_argument('--diff_schedule', type=str, default='cosine', choices=['linear', 'cosine', 'quadratic', 'sigmoid'])
@@ -583,10 +565,10 @@ if __name__ == '__main__':
     parser.add_argument('--pad_mode', type=str, default='zero', choices=['zero', 'replicate'])
 
     # Training
-    parser.add_argument('--max_iter', type=int, default=g_max_iter, help='max number of iterations')     # 50000 - 100000
-    parser.add_argument('--lr', type=float, default=g_lr, help='learning rate')
+    parser.add_argument('--max_iter', type=int, default=100000, help='max number of iterations')     # 50000 - 100000
+    parser.add_argument('--lr', type=float, default=1e-4, help='learning rate')
     parser.add_argument('--gradient_accumulation_steps', type=int, default=1, help='gradient accumulation')
-    parser.add_argument('--scheduler', type=str, default=g_scheduler, choices=['None', 'Warmup', 'WarmupThenDecay'])
+    parser.add_argument('--scheduler', type=str, default='WarmupThenDecay', choices=['None', 'Warmup', 'WarmupThenDecay'])
 
     # 损失函数 & 权重
     parser.add_argument('--criterion', type=str, default='l2', choices=['l1', 'l2'])
@@ -610,8 +592,8 @@ if __name__ == '__main__':
     parser.add_argument('--log_smooth_win', type=int, default=50, help='smooth window for logging')
 
     # warm_up
-    parser.add_argument('--warm_iter', type=int, default=g_warm_iter)          # 2000 - 5000
-    parser.add_argument('--cos_max_iter', type=int, default=g_cos_max_iter)      # 12000 - 50000
+    parser.add_argument('--warm_iter', type=int, default=10000)          # 2000 - 5000
+    parser.add_argument('--cos_max_iter', type=int, default=100000)      # 12000 - 50000
     parser.add_argument('--min_lr_ratio', type=float, default=0.02)
 
     args = parser.parse_args()
