@@ -8,10 +8,8 @@ import pickle
 from torch.utils import data
 sys.path.append(os.path.dirname(os.path.abspath("../")))
 torch.backends.cudnn.benchmark = True # disable CUDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR warning
-import cv2; cv2.setNumThreads(0); cv2.ocl.setUseOpenCL(False)
 
 emo_list = ['angry', 'contempt', 'disgusted', 'fear', 'happy', 'neutral', 'sad', 'surprised']
-emo_label = ['ang',  'con',  'dis',  'fea',  'hap',  'neu',  'sad',  'sur']
 
 # 同分布
 class DiT_Emo_Dataset(data.Dataset):
@@ -46,9 +44,7 @@ class DiT_Emo_Dataset(data.Dataset):
         template_dict = self.template_dict         # 同分布
 
         gt_motions = self.gt_motion_data[metadata["audio_name"]]
-        dit_name = metadata["audio_name"].replace('/mnt/disk2/zhouxishi/JoyVASA/dataset/MEAD11/videos', '/mnt/disk2/zhouxishi/JoyVASA/dataset/MEAD25/raw_videos')
-        dit_motions = self.dit_motion_data[dit_name]
-        # dit_motions = self.dit_motion_data[metadata["audio_name"]]
+        dit_motions = self.dit_motion_data[metadata["audio_name"]]
 
         min_frames = min(gt_motions['n_frames'], dit_motions['n_frames'])
         

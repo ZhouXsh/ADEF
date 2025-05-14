@@ -12,7 +12,6 @@ def partial_fields(target_class, kwargs):
     return target_class(**{k: v for k, v in kwargs.items() if hasattr(target_class, k)})
 
 emo_list = ['angry', 'contempt', 'disgusted', 'fear', 'happy', 'neutral', 'sad', 'surprised']
-emo_label = ['ang',  'con',  'dis',  'fea',  'hap',  'neu',  'sad',  'sur']
 
 class Motion2Emo_Dataset(data.Dataset):
     def __init__(self, root_dir='src/my_prepare', gt_motion_filename="front_all_motions.pkl", motion_template_filename="joyvasa_motion_template.pkl", train_dataset="all_train.txt"):

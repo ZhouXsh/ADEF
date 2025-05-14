@@ -6,7 +6,6 @@ from torch.utils.data import Dataset
 sys.path.append(os.path.dirname(os.path.abspath("../")))
 
 emo_list = ['angry', 'contempt', 'disgusted', 'fear', 'happy', 'neutral', 'sad', 'surprised']
-emo_label = ['ang',  'con',  'dis',  'fea',  'hap',  'neu',  'sad',  'sur']
 
 class AudioEmotionDataset(Dataset):
     def __init__(self, root_dir='src/my_prepare', np_dict = 'front_emotion2vec.pkl', train_txt="all_train.txt"):

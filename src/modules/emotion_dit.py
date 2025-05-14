@@ -9,12 +9,11 @@ from ..config.base_config import make_abs_path
 class DiffusionSchedule(nn.Module):
     def __init__(self, num_steps, mode='linear', beta_1=1e-4, beta_T=0.02, s=0.008):
         super().__init__()
-        # 扩散系数betas      描述了每个时间步添加的噪声强度。
-        if mode == 'linear':    # 线性模式
+        if mode == 'linear':   
             betas = torch.linspace(beta_1, beta_T, num_steps)    # betas 从 beta_1 到 beta_T 线性变化
-        elif mode == 'quadratic':  # 二次模式
+        elif mode == 'quadratic': 
             betas = torch.linspace(beta_1 ** 0.5, beta_T ** 0.5, num_steps) ** 2   # 先从 beta_1 和 beta_T 的平方根开始线性变化，然后平方结果。此模式使得噪声的增加速度更加平缓
-        elif mode == 'sigmoid':    # Sigmoid模式
+        elif mode == 'sigmoid':  
             betas = torch.sigmoid(torch.linspace(-5, 5, num_steps)) * (beta_T - beta_1) + beta_1  # 通过 sigmoid 函数映射到 [beta_1, beta_T] 范围内的
         elif mode == 'cosine':
             steps = num_steps + 1
@@ -25,25 +24,19 @@ class DiffusionSchedule(nn.Module):
             betas = torch.clip(betas, 0.0001, 0.999)
         else:
             raise ValueError(f'Unknown diffusion schedule {mode}!')
-        betas = torch.cat([torch.zeros(1), betas], dim=0)  # Padding beta_0 = 0
-        # betas： 噪声 在结果中的占比
-        # alphas：原图像在结果中的占比
-        alphas = 1 - betas                                   # exp：A，B，C
-        log_alphas = torch.log(alphas)     # alphas 的对数   # exp：logA，logB，logC
-        for i in range(1, log_alphas.shape[0]):  # 1 to T
-            log_alphas[i] += log_alphas[i - 1]               # exp：logA，logB+logA，logC+logB+logA
-        # log_alphas[i]：前面i个log_alphas累加的结果。
-        alpha_bars = log_alphas.exp()                        # exp：A，A·B，A·B·C
-        # alpha_bars[i]：前面i个alphas累乘的结果
-        sigmas_flex = torch.sqrt(betas)                  # betas 的平方根
-        sigmas_inflex = torch.zeros_like(sigmas_flex)    # (T,)    [0,0,0,...,0]
-        for i in range(1, sigmas_flex.shape[0]):      # 1 to T=500
+        betas = torch.cat([torch.zeros(1), betas], dim=0)  
+        alphas = 1 - betas                                  
+        log_alphas = torch.log(alphas)   
+        for i in range(1, log_alphas.shape[0]): 
+            log_alphas[i] += log_alphas[i - 1]               
+        alpha_bars = log_alphas.exp() 
+        sigmas_flex = torch.sqrt(betas)                
+        sigmas_inflex = torch.zeros_like(sigmas_flex)   
+        for i in range(1, sigmas_flex.shape[0]):     
             sigmas_inflex[i] = ((1 - alpha_bars[i - 1]) / (1 - alpha_bars[i])) * betas[i]
-        sigmas_inflex = torch.sqrt(sigmas_inflex)     # sigmas_inflex[t]：xt-1时刻的概率分布P(Xt-1|xt,x0)的标准差（也是固定值）
+        sigmas_inflex = torch.sqrt(sigmas_inflex)    
 
         self.num_steps = num_steps
-        # 将张量注册为模型的一个常量缓冲区。训练过程中这些张量不会更新（即没有梯度）
-        # 当num_steps, mode, beta_1, beta_T, s 参数固定后，下面的值唯一确定
         self.register_buffer('betas', betas)                 # 扩散系数（噪声强度） # exp：1-A，1-B，1-C
         self.register_buffer('alphas', alphas)               # 原图强度 1-betas     # exp：A，B，C
         self.register_buffer('alpha_bars', alpha_bars)        # 简化计算的α累乘     # exp：A，A·B，A·B·C
@@ -62,30 +55,19 @@ class DiffusionSchedule(nn.Module):
         # sigmas_flex[t] 和 sigmas_inflex[t] 是噪声的两个版本，flexibility 控制这两个版本之间的平衡
         return sigmas
 
-# 运动生成？
 class DitTalkingHead(nn.Module):
-    def __init__(self, device='cuda', 
-                 target="sample",        # 指定模型的目标是生成原始图像（"sample"）（反向去噪）还是生成噪声（"noise"）（正向加噪）
-                 architecture="decoder",  
-                 motion_feat_dim=70,           # 运动特征的维度         256                    训练时：70   推理时 73
-                 fps=25, 
-                 n_motions=100,                # 当前需要生成或预测的运动特征（帧）数   100
-                 n_prev_motions=10,            # 先前的运动特征（帧）数                        训练时：25   推理时：10
-                 audio_model="hubert",         # "hubert" 表示使用 HuBERT（一个基于自监督学习的音频特征提取模型）   训练时：wav2vec2  推理时：'hubert_zh_ori'
-                 feature_dim=512,              # 音频特征空间（音频特征向量）的维度             训练、推理时：256
-                 n_diff_steps=500,             # 扩散的步数                                    训练、推理时：50
-                 diff_schedule="cosine",       # 扩散过程中的噪声调度方式。使用余弦函数来安排扩散过程中噪声的变化
-                 cfg_mode="incremental",       # incremental 可能意味着逐步增加条件的强度
-                 guiding_conditions="audio,emotion",   # 只使用音频（audio）作为引导条件
-                 emo_classes = 8):
+    def __init__(self, device='cuda', target="sample", architecture="decoder",  
+                 motion_feat_dim=70, fps=25, n_motions=100, n_prev_motions=10,                               
+                 audio_model="hubert", feature_dim=512, n_diff_steps=500,                                             
+                 diff_schedule="cosine", cfg_mode="incremental", guiding_conditions="audio,emotion", emo_classes = 8):
         super().__init__()
         # Model parameters
         self.target = target # 预测原始图像还是预测噪声
         self.architecture = architecture
-        self.motion_feat_dim = motion_feat_dim   # motion 特征维度     推理时73    训练时70
+        self.motion_feat_dim = motion_feat_dim   # motion 特征维度 
         self.fps = fps
         self.n_motions = n_motions # 当前motion100个, window_length, T_w   窗口长度
-        self.n_prev_motions = n_prev_motions # 前续motion  T_p：  训练时25     推理时10
+        self.n_prev_motions = n_prev_motions # 前续motion
         self.feature_dim = feature_dim
         # self.emo_classes = emo_classes
 
@@ -114,11 +96,11 @@ class DitTalkingHead(nn.Module):
         # 音频编码器的输出通常是一个形状为 [batch_size, seq_len, 768] 的张量，其中 768 是编码器输出的特征维度。   seq_len这里为帧数
         if architecture == 'decoder':
             self.audio_feature_map = nn.Linear(768, feature_dim)              # 768 -> 256
-            self.start_audio_feat = nn.Parameter(torch.randn(1, self.n_prev_motions, feature_dim))        # shape：（1, n_prev_motions=10 or 25, feature_dim=256） 初始随机的音频特征向量
+            self.start_audio_feat = nn.Parameter(torch.randn(1, self.n_prev_motions, feature_dim))        # shape：（1, 25, feature_dim=256） 初始随机的音频特征向量
         else:
             raise ValueError(f'Unknown architecture {architecture}!')
 
-        self.start_motion_feat = nn.Parameter(torch.randn(1, self.n_prev_motions, self.motion_feat_dim))  # shape：（1, n_prev_motions=10 or 25, motion_feat_dim=训练时70推理时73） 初始随机的运动特征向量
+        self.start_motion_feat = nn.Parameter(torch.randn(1, self.n_prev_motions, self.motion_feat_dim))  # shape：（1,  25, motion_feat_dim=70） 初始随机的运动特征向量
 
         # Diffusion model       扩散模型
         self.denoising_net = DenoisingNetwork(device=device, n_motions=self.n_motions, n_prev_motions=self.n_prev_motions, 
@@ -152,7 +134,7 @@ class DitTalkingHead(nn.Module):
     def forward(self, motion_feat, audio_or_feat, prev_motion_feat=None, prev_audio_feat=None, time_step=None, indicator=None, emo_index = None):
         """
         Args:        L = n_motions = 100 当前序列的帧数
-            motion_feat: (N, L, d_coef) motion coefficients or features       训练时： (N=8, L=100, 系数个数=70)
+            motion_feat: (N, L, d_coef) motion coefficients or features     
             audio_or_feat: (N, L_audio) raw audio or audio feature        原始音频(N=8, L_audio) L_audio：音频采样长度    或音频特征(N, L=100, feature_dim=256) L：帧数
             prev_motion_feat: (N, n_prev_motions=10, d_motion=motion_feat_dim=73) previous motion coefficients or feature       先前的运动系数或特征
             prev_audio_feat: (N, n_prev_motions=10, d_audio=feature_dim=256) previous audio features       先前的音频特征
@@ -167,9 +149,6 @@ class DitTalkingHead(nn.Module):
         # 加载语音特征   # (N, L=100, feature_dim=256)
         if audio_or_feat.ndim == 2: # 原始语音           (N=8, L_audio)          this
             # Extract audio features    提取音频特征
-            # 采样率16000次/s    n_motions：该音频序列内的帧数    fps：帧率，帧/s       计算的结果为：采样率×时间 = 总音频（序列）采样长度（次）
-            # assert audio_or_feat.shape[1] == 16000 * self.n_motions / self.fps, \
-            #     f'Incorrect audio length {audio_or_feat.shape[1]}'
             assert audio_or_feat.shape[1] == round(16000 * self.n_motions / self.fps), \
                 f'Incorrect audio length {audio_or_feat.shape[1]}'
             audio_feat_saved = self.extract_audio_feature(audio_or_feat)  # (N, L_audio) ->  (N, L=100, feature_dim=256)  L:帧数
@@ -446,7 +425,6 @@ class DitTalkingHead(nn.Module):
             #    (1, 100, 73)    (1, 100, 73)    (1, 100, 256)  
 
 # 去噪网络 DiT
-# 单次 去噪的过程（训练推理都用得到）
 class DenoisingNetwork(nn.Module):
     def __init__(self, device='cuda', motion_feat_dim=73, 
                  use_indicator=None, architecture="decoder", feature_dim=256, n_heads=8, 
@@ -467,7 +445,7 @@ class DenoisingNetwork(nn.Module):
         self.use_learnable_pe = not no_use_learnable_pe  # 是否使用可学习的位置编码 False
 
         # sequence length
-        self.n_prev_motions = n_prev_motions   # 先前运动特征数（帧             推理10  训练25
+        self.n_prev_motions = n_prev_motions   # 先前运动特征数（帧         
         self.n_motions = n_motions             # 当前运动特征数（帧
 
         # Temporal embedding for the diffusion time step   扩散时间步长的时间嵌入
@@ -496,7 +474,7 @@ class DenoisingNetwork(nn.Module):
             )
             self.transformer = nn.TransformerDecoder(decoder_layer, num_layers=self.n_layers)   # num_layers=8个块（层）
             if self.align_mask_width > 0:     # 1
-                motion_len = self.n_prev_motions + self.n_motions   # Lp + L =   推理110    训练125
+                motion_len = self.n_prev_motions + self.n_motions   # Lp + L =  125
                 alignment_mask = enc_dec_mask(motion_len, motion_len, frame_width=1, expansion=self.align_mask_width - 1)     # (Lp + L, Lp + L)
                 # print(f"alignment_mask: ", alignment_mask.shape)
                 # alignment_mask = F.pad(alignment_mask, (0, 0, 1, 0), value=False)
@@ -510,7 +488,7 @@ class DenoisingNetwork(nn.Module):
         self.motion_dec = nn.Sequential(
             nn.Linear(self.feature_dim, self.feature_dim // 2),     # 256 -> 128
             nn.GELU(),
-            nn.Linear(self.feature_dim // 2, self.motion_feat_dim),  # 128 -> 推理73 训练70
+            nn.Linear(self.feature_dim // 2, self.motion_feat_dim),  # 128 -> 70
             # nn.Tanh() # 增加了一个tanh
             # nn.Softmax()
         )
@@ -550,10 +528,10 @@ class DenoisingNetwork(nn.Module):
         # Concat features and embeddings  拼接（先前运动）特征和（指示器）嵌入
         if self.architecture == 'decoder':
             # print("prev_motion_feat: ", prev_motion_feat.shape, "motion_feat: ", motion_feat.shape)
-            feats_in = torch.cat([prev_motion_feat, motion_feat], dim=1)  # (N, L_p + L, d_motion)   # 训练(8 125 70)  推理(2 110 73)
+            feats_in = torch.cat([prev_motion_feat, motion_feat], dim=1)  # (N, L_p + L, d_motion) 
         else:       
             raise ValueError(f'Unknown architecture: {self.architecture}')
-        if self.use_indicator:   # 拼接指示器   训练：(8 125 70) + (8 125 1)  还是等于(8 125 70)？？？  (2 110 73) + (2 110 1)还是等于(2 110 73)？？？
+        if self.use_indicator:   # 拼接指示器   
             feats_in = torch.cat([feats_in, indicator], dim=-1)  # (N, L_p + L, d_motion)+(N, L_p + L, 1) = (N, L_p + L, d_motion + 1 )
 
         feats_in = self.feature_proj(feats_in)  # (N, L_p + L=125 or 110, 70 or 73) -> (N, L_p + L=125 or 110, feature_dim=256)
@@ -570,16 +548,15 @@ class DenoisingNetwork(nn.Module):
         # Transformer
         if self.architecture == 'decoder':   # forard(N, n_prev_motions=25, feature_dim=256) cat (N=8, L=100, feature_dim=256) = (8 125 256)
             audio_feat_in = torch.cat([prev_audio_feat, audio_feat], dim=1)        # (N, L_p + L, d_audio= feature_dim=256)
-            # print(f"feats_in: {feats_in.shape}, audio_feat_in: {audio_feat_in.shape}, memory_mask: {self.alignment_mask.shape}")
             feat_out = self.transformer(feats_in, audio_feat_in, memory_mask=self.alignment_mask)     # (N, L_p + L, d_audio= feature_dim=256)
-        else:  #  训练(8 125 256)   (8 125 256) None   推理(2 110 256)   (2 110 256) None
+        else:
             raise ValueError(f'Unknown architecture: {self.architecture}')
 
         # Decode predicted motion feature noise / sample
         # motion_feat_target = self.motion_dec(feat_out[:, 1:])  # (N, L_p + L, d_motion)
         motion_feat_target = self.motion_dec(feat_out)          # (N, L_p + L=110, 512 -> 256 -> 73 or 70)
 
-        return motion_feat_target     # 推理(N=2, L_p + L= 110, motion_feat_dim=73)  训练(8, 125, 70)
+        return motion_feat_target
 
 if __name__ == "__main__":
     device = "cuda"

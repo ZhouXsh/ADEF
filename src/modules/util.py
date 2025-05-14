@@ -470,12 +470,6 @@ def drop_path(x, drop_prob=0., training=False, scale_by_keep=True):
     See discussion: https://github.com/tensorflow/tpu/issues/494#issuecomment-532968956 ... I've opted for
     changing the layer and argument names to 'drop path' rather than mix DropConnect as a layer name and use
     'survival rate' as the argument.
-        在残差块体的主路径中应用时，每个样本的下降随机深度的路径
-        “Drop paths”（随机深度）每个样本（当应用于残差块的主路径时）。
-        这与我为 EfficientNet 等网络创建的 DropConnect 实现相同。
-        然而，原始名称具有误导性，因为“Drop Connect”是另一种形式的 dropout，来源于不同的论文…
-        请参见讨论：https://github.com/tensorflow/tpu/issues/494#issuecomment-532968956。
-        因此，我选择将层和参数名称更改为“drop path”，而不是混用“DropConnect”作为层名，并使用“survival rate”作为参数。
     """
     if drop_prob == 0. or not training:
         return x

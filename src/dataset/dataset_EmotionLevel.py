@@ -1,22 +1,13 @@
-import json
 import os
-import io
 import torchaudio
 import numpy as np
 import torch
 from torch.utils import data
 import pickle
 import warnings
-import torch.nn.functional as F
-
-'''
-各情感独立分布的结果
-'''
 
 emo_list = ['angry', 'contempt', 'disgusted', 'fear', 'happy', 'neutral', 'sad', 'surprised']
-emo_label = ['ang',  'con',  'dis',  'fea',  'hap',  'neu',  'sad',  'sur']
 
-# torchaudio.set_audio_backend('soundfile')
 warnings.filterwarnings('ignore', message='PySoundFile failed. Trying audioread instead.')
 
 class EmoLevelDataset(data.Dataset):
@@ -126,7 +117,6 @@ class EmoLevelDataset(data.Dataset):
             # read motion  读取运动系数
             metadata = self.all_data[index]   # 获取第index个视频对应的三文件：视频
 
-# "video_name": "/mnt/disk2/zhouxishi/JoyVASA/single_video/M003_down_angry_level_1_001.mp4",
             emotype = metadata['video_name'].split('/')[-1].split('_')[2]
             emo_index = torch.tensor(emo_list.index(emotype))    # emo对应的索引值   
 
@@ -176,7 +166,6 @@ class EmoLevelDataset(data.Dataset):
                 raise ValueError(f'Unknown crop strategy: {self.crop_strategy}')
             end_frame = start_frame + self.coef_total_len   # 结束帧
 
-            # 0425 统一的template
             Emo_template_dict = self.template_dict   # 统一字典
 
             # 裁剪motion并标准化
@@ -220,10 +209,7 @@ class EmoLevelDataset(data.Dataset):
 
             # Extract two consecutive audio/coef clips  提取两个连续的音频/音频片段
             keys = ['exp', 'pose']
-            # audio_pair: self.coef_total_len * self.audio_unit = 200 * audio_unit = 2 * self.n_motions * audio_unit
-            # audio_pair:[audio的前n_audio_samples，audio的后n_audio_samples]  其中n_audio_samples = round(self.audio_unit * self.n_motions=100)
             audio_pair = [audio[:self.n_audio_samples].clone(), audio[-self.n_audio_samples:].clone()]
-            # coef_pair： self.coef_total_len = 200 = 2 * self.n_motions
             coef_pair = [{k: coef_dict[k][:self.n_motions].clone() for k in keys},   # 前n_motions=100
                         {k: coef_dict[k][-self.n_motions:].clone() for k in keys}]   # 后n_motions=100
             has_valid_audio = True  # 有效的音乐片段。
