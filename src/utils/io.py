@@ -73,28 +73,6 @@ def resize_to_limit(img: np.ndarray, max_dim=1920, division=2):
     return img
 
 # 无用
-def load_img_online(obj, mode="bgr", **kwargs):
-    max_dim = kwargs.get("max_dim", 1920)
-    n = kwargs.get("n", 2)
-    if isinstance(obj, str):
-        if mode.lower() == "gray":
-            img = cv2.imread(obj, cv2.IMREAD_GRAYSCALE)
-        else:
-            img = cv2.imread(obj, cv2.IMREAD_COLOR)
-    else:
-        img = obj
-
-    # Resize image to satisfy constraints
-    img = resize_to_limit(img, max_dim=max_dim, division=n)
-
-    if mode.lower() == "bgr":
-        return contiguous(img)
-    elif mode.lower() == "rgb":
-        return contiguous(img[..., ::-1])
-    else:
-        raise Exception(f"Unknown mode {mode}")
-
-# 无用
 def load(fp):
     suffix_ = suffix(fp)
 

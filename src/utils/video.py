@@ -230,62 +230,6 @@ def add_audio_to_video(silent_video_path: str, audio_video_path: str, output_vid
     except subprocess.CalledProcessError as e:
         log(f"Error occurred: {e}")
 
-# 我写的
-def stack_videos_opencv(video_path1, video_path2, output_path, remove_temp=True):
-    # 打开视频流
-    cap1 = cv2.VideoCapture(video_path1)
-    cap2 = cv2.VideoCapture(video_path2)
-    
-    # 获取原始视频参数
-    width = int(cap1.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap1.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fps = cap1.get(cv2.CAP_PROP_FPS)
-    target_size=(width//2, height//2)
-
-    # 打开视频流
-    cap1 = cv2.VideoCapture(video_path1)
-    cap2 = cv2.VideoCapture(video_path2)
-
-    # 获取视频参数
-    width = int(cap1.get(cv2.CAP_PROP_FRAME_WIDTH))
-    height = int(cap1.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    fps = cap1.get(cv2.CAP_PROP_FPS)
-
-    # 验证尺寸一致性
-    if (width, height) != (int(cap2.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap2.get(cv2.CAP_PROP_FRAME_HEIGHT))):
-        raise ValueError("视频尺寸必须相同")
-
-    # 创建输出视频写入器 (目标宽度, 2倍目标高度)
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')   # 或 mp4v
-    out = cv2.VideoWriter(output_path, fourcc, fps, (width, height//2))
-
-    while True:
-        ret1, frame1 = cap1.read()
-        ret2, frame2 = cap2.read()
-
-        # 任一视频结束则停止
-        if not (ret1 and ret2):
-            break
-
-        ## 直接缩放（保持宽高比一致时无需黑边）
-        resized1 = cv2.resize(frame1, target_size, interpolation=cv2.INTER_AREA)
-        resized2 = cv2.resize(frame2, target_size, interpolation=cv2.INTER_AREA)
-
-        # 垂直拼接
-        stacked = cv2.hconcat([resized1, resized2])   # hconcat：左右拼接      vconcat：上下拼接
-        
-        # 写入帧
-        out.write(stacked)
-
-    # 释放资源
-    cap1.release()
-    cap2.release()
-    out.release()
-
-    if remove_temp:
-        os.remove(video_path1)
-        os.remove(video_path2)
-
 # 没用
 def bb_intersection_over_union(boxA, boxB):
     xA = max(boxA[0], boxB[0])
