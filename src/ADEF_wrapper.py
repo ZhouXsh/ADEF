@@ -436,7 +436,7 @@ class ADEFWrapper(object):
 
 #### 20250420 情感增强
             if self.emo_ehance:
-                emo_level = torch.tensor([args.enhance_level],dtype=torch.long).to(self.device)
+                emo_level = torch.tensor([args.enhance_level-1],dtype=torch.long).to(self.device)
                 delta_emo = self.emo_enhancer(motion_feat[:, self.n_prev_motions:, :63], emo_index, emo_level)
                 motion_feat[:, self.n_prev_motions:, :63] = motion_feat[:, self.n_prev_motions:, :63] + delta_emo.detach()
 #### ------------------------

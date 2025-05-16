@@ -38,9 +38,9 @@ def DitOnly(device_id = 1):
         emo_name = image_sp[2]  # angry
         emo_level = int(image_sp[4])-1  
         audio = f'/mnt/disk2/zhouxishi/JoyVASA/dataset/MEAD11/videos/{image_sp[0]}/{image_sp[1]}/{image_sp[2]}/{image_sp[3]}_{image_sp[4]}/{image_names}.wav'
-        exec_emo(image,audio,out_dir,emo_name,False,emo_level,device_id)
+        exec_emo(image,audio,out_dir,emo_name,False,emo_level,False,device_id)
 
-def Dit_Enhancer(device_id = 2):
+def Dit_Enhancer(device_id = 3):
     out_dir = '/mnt/disk2/zhouxishi/JoyVASA/eval/0513_DiT_Enhancer'
     for i in tqdm(range(0,len(images_list),25)):
         image = images_list[i]
@@ -50,7 +50,7 @@ def Dit_Enhancer(device_id = 2):
         emo_name = image_sp[2]  # angry
         emo_level = int(image_sp[4])-1  
         audio = f'/mnt/disk2/zhouxishi/JoyVASA/dataset/MEAD11/videos/{image_sp[0]}/{image_sp[1]}/{image_sp[2]}/{image_sp[3]}_{image_sp[4]}/{image_names}.wav'
-        exec_emo(image,audio,out_dir,emo_name,True,emo_level,device_id)
+        exec_emo(image,audio,out_dir,emo_name,True,emo_level,False,device_id)
 
-# DitOnly()
-Dit_Enhancer()
+DitOnly()
+# Dit_Enhancer()

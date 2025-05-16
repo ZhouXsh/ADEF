@@ -22,7 +22,7 @@ class ArgumentConfig(PrintableConfig):
     emotype: Annotated[str, tyro.conf.arg(aliases=["-e"])] = "angry"    # emotion type, only for human animation, choose from ["happy", "sad", "angry", "fear", "disgusted", "surprised", "neutral", "contempt"]
 
     use_emo_enhancer: Literal[True, False] = False
-    enhance_level: int = 1  # emotion enhancer level, 0,1,2
+    enhance_level: int = 1  # emotion enhancer level, 1,2,3
 
     use_emo_analyzer: Literal[True, False] = True  # whether to use emotion analyzer
 

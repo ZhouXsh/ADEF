@@ -39,7 +39,7 @@ class InferenceConfig(PrintableConfig):
 
     # EXPORTED PARAMS  导出参数
     use_emo_enhancer: bool = False
-    enhance_level: int = 1  # emotion enhancer level, 0,1,2
+    enhance_level: int = 1  # emotion enhancer level, 1,2,3
 
     use_emo_analyzer: bool = True  # whether to use emotion analyzer
 

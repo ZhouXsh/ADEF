@@ -186,4 +186,6 @@ src/my_prepare/*.pkl
 
 src/my_prepare/*.txt
 
-train-bak.py
+*-bak.py
+
+generate.py
