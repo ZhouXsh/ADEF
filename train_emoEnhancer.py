@@ -36,7 +36,7 @@ def transf_train():
     device = torch.device("cuda:3" if torch.cuda.is_available() else "cpu")
     model = EmotionTransformer().to(device)
 
-    # 0417 情感分类器    0426高dim且同分布
+    # 情感分类器
     emo_classifier = Classifier().to(device)
     emo_classifier.load_state_dict(torch.load(f'pretrained_weights/ADEF/emo_classifier/emo_level_classifier.pth', map_location=device))
     emo_classifier.eval()

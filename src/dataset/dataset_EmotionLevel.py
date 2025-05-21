@@ -27,9 +27,9 @@ class EmoLevelDataset(data.Dataset):
         self.normalize_type = normalize_type
 
         if split == "train":
-            self.root_dir = os.path.join(root_dir, "all_train.txt")  #  prepare_data/train.json
+            self.root_dir = os.path.join(root_dir, "train.txt")  #  prepare_data/train.json
         else:
-            self.root_dir = os.path.join(root_dir, "all_test.txt")  #  prepare_data/test.json
+            self.root_dir = os.path.join(root_dir, "test.txt")  #  prepare_data/test.json
 
         # txt读取 
         with open(self.root_dir, "r", encoding="utf-8") as file:

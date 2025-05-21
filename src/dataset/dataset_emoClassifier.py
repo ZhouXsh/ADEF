@@ -14,7 +14,7 @@ def partial_fields(target_class, kwargs):
 emo_list = ['angry', 'contempt', 'disgusted', 'fear', 'happy', 'neutral', 'sad', 'surprised']
 
 class Motion2Emo_Dataset(data.Dataset):
-    def __init__(self, root_dir='src/my_prepare', gt_motion_filename="front_all_motions.pkl", motion_template_filename="joyvasa_motion_template.pkl", train_dataset="all_train.txt"):
+    def __init__(self, root_dir='src/my_prepare', gt_motion_filename="front_all_motions.pkl", motion_template_filename="joyvasa_motion_template.pkl", train_dataset="train.txt"):
         self.template_dict = pickle.load(open(os.path.join(root_dir, motion_template_filename), 'rb'))
         self.gt_motion_data = pickle.load(open(os.path.join(root_dir, gt_motion_filename), "rb"))
         print("load all motion data done...")

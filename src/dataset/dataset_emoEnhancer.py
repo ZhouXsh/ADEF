@@ -20,7 +20,7 @@ class DiT_Emo_Dataset(data.Dataset):
         print("load all motion data done...")
         self.eps = 1e-9
         
-        txt_path = os.path.join(root_dir, "all_train.txt")
+        txt_path = os.path.join(root_dir, "train.txt")
         with open(txt_path, "r", encoding="utf-8") as file:
             lines = [line.strip() for line in file.readlines()]
             self.all_data = [{

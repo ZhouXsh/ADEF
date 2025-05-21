@@ -48,9 +48,24 @@ def Dit_Enhancer(device_id = 3):
         image_names = image.split('/')[-1].split('.')[0]    # M009_front_angry_level_2_001
         image_sp = image_names.split('_')  # M009 front angry level 2 001
         emo_name = image_sp[2]  # angry
-        emo_level = int(image_sp[4])-1  
+        emo_level = int(image_sp[4])
         audio = f'/mnt/disk2/zhouxishi/JoyVASA/dataset/MEAD11/videos/{image_sp[0]}/{image_sp[1]}/{image_sp[2]}/{image_sp[3]}_{image_sp[4]}/{image_names}.wav'
         exec_emo(image,audio,out_dir,emo_name,True,emo_level,False,device_id)
 
-DitOnly()
+# DitOnly()
 # Dit_Enhancer()
+
+def Dit_Contrast(device_id = 3):
+    out_dir = '/mnt/disk2/zhouxishi/JoyVASA/eval/0518_Contrast'
+    image_dir = '/mnt/disk3/zhouxishi/DICE-Talk/examples/img'
+    audio = '/mnt/disk3/zhouxishi/DICE-Talk/examples/wav/female-zh.wav'
+    images_list = sorted([os.path.join(image_dir,image) for image in os.listdir(image_dir)])
+    for i in tqdm(range(0,len(images_list))):
+        image = images_list[i]
+        for emo_name in ['angry','happy','sad','fear','disgusted','surprised','contempt','neutral']:
+            print(f'执行 {emo_name} 情感')
+            out_dir2 = out_dir + '/' + emo_name
+            os.makedirs(out_dir2,exist_ok=True)
+            exec_emo(image,audio,out_dir2,emo_name,False,0,False,device_id)
+
+Dit_Contrast(device_id = 1)

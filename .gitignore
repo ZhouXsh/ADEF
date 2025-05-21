@@ -161,24 +161,9 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
-# 用我自己数据集10*10跑出来的效果
-animations/
-
-# 测试视频的临时目录
-new/        
-new_animations/  
-
-# 它的
 data/
 pretrained_weights/
 experiments/
-
-# MEAD部分，用于训练部分代码的测试
-single_video/
-
-111.py
-
-222.py
 
 *.mp4
 

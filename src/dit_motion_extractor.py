@@ -2,11 +2,9 @@
 import torch
 torch.backends.cudnn.benchmark = True # disable CUDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR warning
 
-import cv2; cv2.setNumThreads(0); cv2.ocl.setUseOpenCL(False)
 import numpy as np
 import os
 import os.path as osp
-import tyro
 import subprocess
 from rich.progress import track
 
@@ -17,49 +15,14 @@ from .utils.io import dump
 from .utils.helper import remove_suffix
 from .utils.rprint import rlog as log
 
-
-import os.path as osp
-import os
 import pickle
-import numpy as np
-import cv2
-import torch
 import yaml
 import math
 import librosa
 import torch.nn.functional as F
-from rich.progress import track
-
-from .utils.timer import Timer
-from .utils.helper import load_model, concat_feat
-from .utils.camera import headpose_pred_to_degree, get_rotation_matrix
-from .utils.retargeting_utils import calc_eye_close_ratio, calc_lip_close_ratio
-from .config.inference_config import InferenceConfig
-from .utils.rprint import rlog as log
-from .utils.filter import smooth_
-import os.path as osp
-import os
-import pickle
-import numpy as np
-import cv2
-import torch
-import yaml
-import math
-import librosa
-import torch.nn.functional as F
-from rich.progress import track
 
 from .utils.helper import load_model
-from .utils.camera import get_rotation_matrix
-from .config.inference_config import InferenceConfig
-from .utils.rprint import rlog as log
 from .utils.filter import smooth_
-
-'''
-joyvasa的DiT  
-用于训练时提取motion的Motion Extractor
-zxs 20250323
-'''
 
 # 检查ffmpeg是否存在
 def fast_check_ffmpeg():
@@ -209,11 +172,9 @@ class DiTMotionExtractor(object):
 # （处理训练视频）生成输入视频的 运动模版
 def make_motion_templete(args, driving_audio, suffix=".pkl", gpu_id=0): 
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)       # 让该进程只看到指定 GPU
-    # print(f"Process {os.getpid()} using GPU {gpu_id} for video {driving_audio}")
 
     wfp_template = remove_suffix(driving_audio) + '_DiT' + suffix    # xxx.pkl
     if os.path.exists(wfp_template):  # 已处理
-        # log(f"{driving_audio}motion generated ...")
         return
 
     # configs

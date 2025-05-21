@@ -43,10 +43,10 @@ random.shuffle(video_list)     # 打乱顺序
 num_train_labels = int(0.9 * len(video_list)) 
 
 # 打开文件并写入
-with open(f"all_train.txt", "w") as f:
+with open(f"train.txt", "w") as f:
     for item in video_list[:num_train_labels]:
         f.write(f"{item}\n")
 
-with open(f"all_test.txt", "w") as f:
+with open(f"test.txt", "w") as f:
     for item in video_list[num_train_labels:]:
         f.write(f"{item}\n")

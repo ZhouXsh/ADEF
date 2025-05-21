@@ -22,16 +22,11 @@ device_id = 2  # 选择 GPU
 torch.cuda.set_device(device_id)  # 设置默认 GPU
 device = torch.device(f"cuda:{device_id}" if torch.cuda.is_available() else "cpu")  # 显式指定设备
 
-classifier = Classifier().to(device)
-classifier.load_state_dict(torch.load(f'pretrained_weights/ADEF/emo_classifier/emo_level_classifier.pth', map_location=device), strict=False)
-classifier.eval()
+cross_criterion = torch.nn.CrossEntropyLoss()
 
-criterion = torch.nn.CrossEntropyLoss()
+def train(args, model, train_loader, val_loader, optimizer, save_dir, scheduler=None, writer=None, start_iter=0, classifier=None):
 
-def train(args, model, train_loader, val_loader, optimizer, save_dir, scheduler=None, writer=None, start_iter=0):
-
-    # print(f'训练开始~！！！！！！！！！！！')
-    save_dir.mkdir(parents=True, exist_ok=True)   # experiments/JoyVASA/test_b16/checkpoints
+    save_dir.mkdir(parents=True, exist_ok=True) 
 
     # model
     device = model.device
@@ -47,6 +42,12 @@ def train(args, model, train_loader, val_loader, optimizer, save_dir, scheduler=
         std_exps.append(torch.tensor(alone_temp[i]['std_exp']))
     mean_exps = torch.stack(mean_exps,dim=0).to(device)   # [8, 63]
     std_exps = torch.stack(std_exps,dim=0).to(device)     # [8, 63]
+    norm_dict = {
+        'mean_exp': mean_exp,
+        'std_exp': std_exp,
+        'mean_exps': mean_exps,
+        'std_exps': std_exps
+    }
 #############
 
     data_loader = infinite_data_loader(train_loader)   # 将数据加载器（train_loader）转换为一个无限循环的迭代器
@@ -63,7 +64,6 @@ def train(args, model, train_loader, val_loader, optimizer, save_dir, scheduler=
             utils.get_motion_coef(coef_pair[i], args.rot_repr, predict_head_pose) for i in range(2)  # rot_repr= aa
         ] 
         emo_index = emo_index.to(device)
-        # print(f'数据加载完毕')
 
         # Extract audio features  提取音频特征
         if args.use_context_audio_feat:   # False
@@ -71,7 +71,7 @@ def train(args, model, train_loader, val_loader, optimizer, save_dir, scheduler=
             audio_feat = model.extract_audio_feature(torch.cat(audio_pair, dim=1), args.n_motions * 2)  # (N, 2L, :)
 
         loss_noise = 0                                    # 去噪损失
-        loss_emo = torch.tensor(0, device=device)         # 0417 情感损失-交叉熵
+        loss_emo = torch.tensor(0, device=device)         # 情感损失
         loss_exp = torch.tensor(0, device=device)         # 表情变形损失
         loss_exp_v = torch.tensor(0, device=device)
         loss_exp_s = torch.tensor(0, device=device)
@@ -80,10 +80,9 @@ def train(args, model, train_loader, val_loader, optimizer, save_dir, scheduler=
         loss_head_smooth = torch.tensor(0, device=device)
         loss_head_trans = 0
         for i in range(2):   # 前n_motions 和 后n_motions
-            # print(f'第{i}次motion处理~！！！！！！！！！！！')
             audio = audio_pair[i]  # (N=8, L_a)           N：批次大小  L_a：100帧对应的音频长度（样本）
             motion_coef = motion_coef_pair[i]  # (N=8, L=100, 50+x=70)   L：帧数    50+x：运动参数的总数
-            batch_size = audio.shape[0]  # N = 16 ？？？？？？？？
+            batch_size = audio.shape[0]  # N = 16 
 
             # truncate input audio and motion according to trunc_prob 根据trunc_prob截断输入音频和运动
             # 随机截断 被截断部分填0            截断是为了适应不同长度的audio
@@ -131,20 +130,18 @@ def train(args, model, train_loader, val_loader, optimizer, save_dir, scheduler=
                 noise, target, _, _ = model(motion_coef_in, audio_in, prev_motion_coef, prev_audio_feat, indicator=indicator, emo_index = emo_index)
                 #  (8, 100, 70) , (8, 125, 70)
             loss_n, loss_exp, loss_exp_v, loss_exp_s, loss_ha, loss_hc, loss_hs, loss_ht = utils.compute_loss_new(args, i == 0, motion_coef_in, noise, target, prev_motion_coef, end_idx)
-            # # 去噪损失，表情损失，表情速度损失，表情平滑损失，头部姿势损失，~~速度损失，~~平滑损失，？？？总损失(第一次时是NOne，只适用于第二次)
 
-            # 0417 情感损失-交叉熵
             exps = target[:, args.n_prev_motions:, :63].clone()   # (N,100,63)    各自归一化的
 
-###########################   再归一化
+            # 增强归一化
             alone_mean = mean_exps[emo_index].unsqueeze(1)        # (N,1,63)
             alone_std = std_exps[emo_index].unsqueeze(1)          # (N,1,63)
 
             exps = (exps * alone_std + alone_mean - mean_exp) / (std_exp + 1e-9)             # 反归一化 再 归一化
 
-###########################
+            # 情感分类（情感损失）
             pred_emo, _ = classifier(exps)   # (N,100,63)  -> (N,8)
-            loss_e = criterion(pred_emo, emo_index)
+            loss_e = cross_criterion(pred_emo, emo_index)
             loss_emo = loss_emo + loss_e / 2
 
             loss_noise = loss_noise + loss_n / 2        # 前n_motions和后n_motions各占一半，因此除以2。下同
@@ -167,7 +164,7 @@ def train(args, model, train_loader, val_loader, optimizer, save_dir, scheduler=
         loss_log['noise'].append(loss_noise.item())
         loss = loss_noise
 
-        # 0417 情感损失-交叉熵
+        # 情感损失
         loss_log['emo'].append(loss_emo.item())
         loss = loss + loss_emo
 
@@ -219,14 +216,14 @@ def train(args, model, train_loader, val_loader, optimizer, save_dir, scheduler=
             description += f', HS: {np.mean(loss_log["head_smooth"]):.3e}'
         if args.target == 'sample' and predict_head_pose and args.l_head_trans > 0:
             description += f', HT: {np.mean(loss_log["head_trans"]):.3e}'
-        description += f", Emo: {np.mean(loss_log['emo']):.3e}"   # 0417情感损失-交叉熵
+        description += f", Emo: {np.mean(loss_log['emo']):.3e}"   # 情感损失-交叉熵
         description += ']'
         logging.info(description)
 
         # write to tensorboard  写入tensorboard，记录曲线
         if it % args.log_iter == 0 and writer is not None:
             writer.add_scalar('train/total_loss', np.mean(loss_log['loss']), it)     # 总损失
-            writer.add_scalar('train/emotion_loss', np.mean(loss_log['emo']), it)   # 0417情感损失-交叉熵
+            writer.add_scalar('train/emotion_loss', np.mean(loss_log['emo']), it)   # 情感损失-交叉熵
             writer.add_scalar('train/simple_loss', np.mean(loss_log['noise']), it)   # 扩散采样损失
             writer.add_scalar('train/exp_loss', np.mean(loss_log['exp']), it)        # 表情损失
             writer.add_scalar('train/exp_vel_loss', np.mean(loss_log['exp_vel']), it)
@@ -249,42 +246,48 @@ def train(args, model, train_loader, val_loader, optimizer, save_dir, scheduler=
         # save model   保存模型中间结果
         if (it % args.save_iter == 0 and it != 0) or it == args.max_iter: # 每1000次迭代 保存一次。 第50000次 保存一次
             torch.save({
-                'args': args,
+                'args': args,                 # args：模型参数
                 'model': model.state_dict(),   # 模型
                 'iter': it,                    # 训练轮次
-            }, save_dir / f'iter_{it:07}.pt')   # experiments/JoyVASA/test_b16/checkpoints/iter_{it:07}.pt
+            }, save_dir / f'iter_{it:07}.pt')   
 
         # validation  验证模型
-        # if (it % args.val_iter == 0 or it == 0) or it == args.max_iter:  # 每50次迭代 验证一次。 第0次和第50000次 验证一次
-        #     val(args, model, val_loader, it, 1, 'val', writer)
+        if (it % args.val_iter == 0 or it == 0) or it == args.max_iter:  # 每50次迭代 验证一次。 第0次和第50000次 验证一次
+            val(args, model, val_loader, it, 1, 'val', writer, norm_dict,classifier)
 
 # 测试部分
 @torch.no_grad()
-def val(args, model, test_loader, current_iter, n_rounds=1, mode='val', writer=None):
+def val(args, model, test_loader, current_iter, n_rounds=1, mode='val', writer=None, norm_dict=None, classifier=None):
     # print("test ... ")
     is_training = model.training
     device = model.device
     model.eval()   # 设置为eval模式
 
-    audio_unit = test_loader.dataset.audio_unit    # 音频采样长度/帧
-    # print(f'{audio_unit}采样长度/帧')
+    audio_unit = test_loader.dataset.audio_unit
     predict_head_pose = not args.no_head_pose
+
+############
+    mean_exp, std_exp = norm_dict['mean_exp'], norm_dict['std_exp']
+    mean_exps, std_exps = norm_dict['mean_exps'], norm_dict['std_exps']
+#############
 
     loss_log = defaultdict(list)
     for test_round in range(n_rounds):     # 1  只测试一次
         # 后面的代码与训练部分基本一致。。
-        for audio_pair, coef_pair in test_loader:
+        for audio_pair, coef_pair, emo_index, _ in test_loader:
             audio_pair = [audio.to(device) for audio in audio_pair]
             coef_pair = [{x: coef_pair[i][x].to(device) for x in coef_pair[i]} for i in range(2)]
             motion_coef_pair = [
                 utils.get_motion_coef(coef_pair[i], args.rot_repr, predict_head_pose) for i in range(2)
             ]  # (N, L, 50+x)
+            emo_index = emo_index.to(device)
 
             # Extract audio features
             if args.use_context_audio_feat:   # False
                 audio_feat = model.extract_audio_feature(torch.cat(audio_pair, dim=1), args.n_motions * 2)  # (N, 2L, :)
 
             loss_noise = 0
+            loss_emo = torch.tensor(0, device=device)
             loss_exp = 0
             loss_exp_v = 0
             loss_exp_s = 0
@@ -323,7 +326,7 @@ def val(args, model, test_loader, current_iter, n_rounds=1, mode='val', writer=N
 
                 # Inference
                 if i == 0:
-                    noise, target, prev_motion_coef, prev_audio_feat = model(motion_coef_in, audio_in, indicator=indicator)
+                    noise, target, prev_motion_coef, prev_audio_feat = model(motion_coef_in, audio_in, indicator=indicator, emo_index=emo_index)
                     if end_idx is not None:  # was truncated, needs to use the complete feature
                         prev_motion_coef = motion_coef[:, -args.n_prev_motions:]
                         if args.use_context_audio_feat:   # False
@@ -335,10 +338,22 @@ def val(args, model, test_loader, current_iter, n_rounds=1, mode='val', writer=N
                         prev_motion_coef = prev_motion_coef[:, -args.n_prev_motions:]
                         prev_audio_feat = prev_audio_feat[:, -args.n_prev_motions:]
                 else:
-                    noise, target, _, _ = model(motion_coef_in, audio_in, prev_motion_coef, prev_audio_feat, indicator=indicator)
+                    noise, target, _, _ = model(motion_coef_in, audio_in, prev_motion_coef, prev_audio_feat, indicator=indicator, emo_index=emo_index)
 
                 loss_n, loss_exp, loss_exp_v, loss_exp_s, loss_ha, loss_hc, loss_hs, loss_ht = utils.compute_loss_new(args, i == 0, motion_coef_in, noise, target, prev_motion_coef, end_idx)
-                # 去噪损失，表情损失，表情速度损失，表情平滑损失，头部姿势损失，~~速度损失，~~平滑损失，？？？总损失
+
+                exps = target[:, args.n_prev_motions:, :63].clone()   # (N,100,63)    各自归一化的
+
+                # 增强归一化
+                alone_mean = mean_exps[emo_index].unsqueeze(1)        # (N,1,63)
+                alone_std = std_exps[emo_index].unsqueeze(1)          # (N,1,63)
+
+                exps = (exps * alone_std + alone_mean - mean_exp) / (std_exp + 1e-9)             # 反归一化 再 归一化
+
+                # 情感分类（情感损失）
+                pred_emo, _ = classifier(exps)   # (N,100,63)  -> (N,8)
+                loss_e = cross_criterion(pred_emo, emo_index)
+                loss_emo = loss_emo + loss_e / 2
 
                 # simple loss   简单损失：真实运动序列 和 生成的干净运动序列 之间的L2距离。
                 loss_noise = loss_noise + loss_n / 2    # 前n_motions和后n_motions各占一半，因此除以2。下同
@@ -362,6 +377,9 @@ def val(args, model, test_loader, current_iter, n_rounds=1, mode='val', writer=N
             loss_log['noise'].append(loss_noise.item())
             loss = loss_noise
             
+            loss_log['emo'].append(loss_emo.item())
+            loss = loss + loss_emo
+
             loss_log['exp'].append(loss_exp.item() * args.l_exp)
             loss = loss + args.l_exp * loss_exp
 
@@ -374,15 +392,12 @@ def val(args, model, test_loader, current_iter, n_rounds=1, mode='val', writer=N
             if args.target == 'sample' and predict_head_pose and args.l_head_angle > 0:
                 loss_log['head_angle'].append(loss_head_angle.item() * args.l_head_angle)
                 loss = loss + args.l_head_angle * loss_head_angle
-
             if args.target == 'sample' and predict_head_pose and args.l_head_vel > 0:
                 loss_log['head_vel'].append(loss_head_vel.item() * args.l_head_vel)
                 loss = loss + args.l_head_vel * loss_head_vel
-
             if args.target == 'sample' and predict_head_pose and args.l_head_smooth > 0:
                 loss_log['head_smooth'].append(loss_head_smooth.item() * args.l_head_smooth)
                 loss = loss + args.l_head_smooth * loss_head_smooth
-
             if args.target == 'sample' and predict_head_pose and args.l_head_trans > 0:
                 loss_log['head_trans'].append(loss_head_trans.item() * args.l_head_trans)
                 loss = loss + args.l_head_trans * loss_head_trans
@@ -401,16 +416,18 @@ def val(args, model, test_loader, current_iter, n_rounds=1, mode='val', writer=N
         description += f', HS: {np.mean(loss_log["head_smooth"]):.3e}'
     if args.target == 'sample' and predict_head_pose and args.l_head_trans > 0:
         description += f', HT: {np.mean(loss_log["head_trans"]):.3e}'
+    description += f", Emo: {np.mean(loss_log['emo']):.3e}"   # 情感损失-交叉熵
     description += ']'
     print(description)
 
     # write to tensorboard
     if writer is not None:
         writer.add_scalar(f'{mode}/total_loss', np.mean(loss_log['loss']), current_iter)
-        writer.add_scalar(f'{mode}/simplt_loss', np.mean(loss_log['noise']), current_iter)
-        writer.add_scalar('train/exp_loss', np.mean(loss_log['exp']), current_iter)
-        writer.add_scalar('train/exp_vel_loss', np.mean(loss_log['exp_vel']), current_iter)
-        writer.add_scalar('train/exp_smooth_loss', np.mean(loss_log['exp_smooth']), current_iter)
+        writer.add_scalar(f'{mode}/emotion_loss', np.mean(loss_log['emo']), current_iter)
+        writer.add_scalar(f'{mode}/simple_loss', np.mean(loss_log['noise']), current_iter)
+        writer.add_scalar(f'{mode}/exp_loss', np.mean(loss_log['exp']), current_iter)
+        writer.add_scalar(f'{mode}/exp_vel_loss', np.mean(loss_log['exp_vel']), current_iter)
+        writer.add_scalar(f'{mode}/exp_smooth_loss', np.mean(loss_log['exp_smooth']), current_iter)
         if args.target == 'sample' and predict_head_pose and args.l_head_angle > 0:
             writer.add_scalar(f'{mode}/head_angle', np.mean(loss_log['head_angle']), current_iter)
         if args.target == 'sample' and predict_head_pose and args.l_head_vel > 0:
@@ -445,18 +462,18 @@ def main(args, option_text=None):
         guiding_conditions  = args.guiding_conditions,  # ('--guiding_conditions', type=str, default='audio,')
     )
 
-    model = DitTalkingHead(**model_kwargs)             # 音频2运动扩散模型
+    model = DitTalkingHead(**model_kwargs)            
 
-    exp_dir = Path('experiments/emo_dit') / f'{args.exp_name}'     # experiments/JoyVASA/test_b16
-    ckpt_dir = exp_dir / 'checkpoints'         # experiments/JoyVASA/test_b16/checkpoints
-    pt_files = list(ckpt_dir.glob('*.pt'))
+    exp_dir = Path('experiments/emo_dit') / f'{args.exp_name}'     
     start_iter = 0
-    if pt_files:
-        ckpt_path = sorted(pt_files, reverse=True)[0]    # 获取最新的模型文件路径
-        model_data = torch.load(ckpt_path, map_location=device)
-        model.load_state_dict(model_data['model'], strict=False)
-        start_iter = model_data['iter'] + 1
-        print(f"Loading model from {ckpt_path}, start from iter {start_iter}.")
+    # ckpt_dir = exp_dir / 'checkpoints'       
+    # pt_files = list(ckpt_dir.glob('*.pt'))
+    # if pt_files:   # 模型加载（lr的加载没完成，建议还是从头开始。。。）
+    #     ckpt_path = sorted(pt_files, reverse=True)[0]    # 获取最新的模型文件路径
+    #     model_data = torch.load(ckpt_path, map_location=device)
+    #     model.load_state_dict(model_data['model'], strict=False)
+    #     start_iter = model_data['iter'] + 1
+    #     print(f"Loading model from {ckpt_path}, start from iter {start_iter}.")
 
     # Dataset
     train_dataset = EmoLevelDataset(args.data_root,                          # 'prepare_data/'  数据集根目录
@@ -467,19 +484,23 @@ def main(args, option_text=None):
                                             n_motions=args.n_motions,                    # 100
                                             crop_strategy=args.crop_strategy,            # random
                                             normalize_type=args.normalize_type)          # mix
-    # val_dataset = EmoLevelDataset(args.data_root, motion_filename=args.motion_filename, 
-    #                                        motion_template_filename=args.motion_template_filename, split="val", coef_fps=args.fps, n_motions=args.n_motions, 
-    #                                        crop_strategy=args.crop_strategy, normalize_type=args.normalize_type)
+    val_dataset = EmoLevelDataset(args.data_root, motion_filename=args.motion_filename, 
+                                           motion_template_filename=args.motion_template_filename, split="val", coef_fps=args.fps, n_motions=args.n_motions, 
+                                           crop_strategy=args.crop_strategy, normalize_type=args.normalize_type)
     train_loader = data.DataLoader(train_dataset,
                                     batch_size=args.batch_size,       # 16
                                     shuffle=True,
                                     num_workers=args.num_workers,     # 4
                                     pin_memory=True)
-    # val_loader = data.DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
-    val_loader =None
+    val_loader = data.DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
+
+    # 情感分类器
+    classifier = Classifier().to(device)
+    classifier.load_state_dict(torch.load(f'pretrained_weights/ADEF/emo_classifier/emo_level_classifier.pth', map_location=device), strict=False)
+    classifier.eval()
 
     # Logging    TensorBoard的日志
-    log_dir = exp_dir / 'logs'                  # experiments/JoyVASA/test_b16/logs
+    log_dir = exp_dir / 'logs'                 
     log_dir.mkdir(parents=True, exist_ok=True)
     writer = SummaryWriter(str(log_dir))
     if option_text is not None:
@@ -488,7 +509,7 @@ def main(args, option_text=None):
         writer.add_text('options', option_text)
 
     # logger   日志，保存到log_dir/log.txt
-    logging.basicConfig(filename=os.path.join(str(log_dir), "log.txt"),   # experiments/JoyVASA/test_b16/logs/log.txt
+    logging.basicConfig(filename=os.path.join(str(log_dir), "log.txt"), 
                     level=logging.INFO,
                     format='%(asctime)s %(message)s', 
                     datefmt='%Y/%m/%d %H:%M:%S')
@@ -507,7 +528,7 @@ def main(args, option_text=None):
         after_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, args.cos_max_iter - args.warm_iter,
                                                                 args.lr * args.min_lr_ratio)
         scheduler = GradualWarmupScheduler(optimizer, 1, args.warm_iter, after_scheduler)
-    else:    # this
+    else:
         scheduler = None
 
     # train
@@ -516,10 +537,11 @@ def main(args, option_text=None):
           train_loader,      # 训练集
           val_loader,        # 测试集
           optimizer,
-          exp_dir / 'checkpoints',    # experiments/JoyVASA/test_b16/checkpoints
-          scheduler,                  # None
+          exp_dir / 'checkpoints',  
+          scheduler,         
           writer,
-          start_iter=start_iter)
+          start_iter=start_iter,
+          classifier=classifier)
 
 
 if __name__ == '__main__':
@@ -561,11 +583,11 @@ if __name__ == '__main__':
     parser.add_argument('--n_motions', type=int, default=100, help='number of motions in a sequence')
     parser.add_argument('--n_prev_motions', type=int, default=25, help='number of pre-motions in a sequence')
     parser.add_argument('--motion_feat_dim', type=int, default=70)
-    parser.add_argument('--fps', type=int, default=25, help='frame per second')         # 25-->30
+    parser.add_argument('--fps', type=int, default=25, help='frame per second')      
     parser.add_argument('--pad_mode', type=str, default='zero', choices=['zero', 'replicate'])
 
     # Training
-    parser.add_argument('--max_iter', type=int, default=100000, help='max number of iterations')     # 50000 - 100000
+    parser.add_argument('--max_iter', type=int, default=100000, help='max number of iterations')   
     parser.add_argument('--lr', type=float, default=1e-4, help='learning rate')
     parser.add_argument('--gradient_accumulation_steps', type=int, default=1, help='gradient accumulation')
     parser.add_argument('--scheduler', type=str, default='WarmupThenDecay', choices=['None', 'Warmup', 'WarmupThenDecay'])
@@ -574,8 +596,8 @@ if __name__ == '__main__':
     parser.add_argument('--criterion', type=str, default='l2', choices=['l1', 'l2'])
     parser.add_argument('--clip_grad', default=True, action='store_true')
     parser.add_argument('--l_exp', type=float, default=0.1, help='weight of the head angle loss')
-    parser.add_argument('--l_exp_vel', type=float, default=1e-4, help='weight of the head angle loss')      # 1e-4  to  1e-3
-    parser.add_argument('--l_exp_smooth', type=float, default=1e-4, help='weight of the head angle loss')   # 1e-4  to  1e-3
+    parser.add_argument('--l_exp_vel', type=float, default=1e-4, help='weight of the head angle loss')     
+    parser.add_argument('--l_exp_smooth', type=float, default=1e-4, help='weight of the head angle loss')  
     parser.add_argument('--l_head_angle', type=float, default=1e-2, help='weight of the head angle loss')
     parser.add_argument('--l_head_vel', type=float, default=1e-2, help='weight of the head angular velocity loss')
     parser.add_argument('--l_head_smooth', type=float, default=1e-2, help='weight of the head angular acceleration regularization')
@@ -592,8 +614,8 @@ if __name__ == '__main__':
     parser.add_argument('--log_smooth_win', type=int, default=50, help='smooth window for logging')
 
     # warm_up
-    parser.add_argument('--warm_iter', type=int, default=10000)          # 2000 - 5000
-    parser.add_argument('--cos_max_iter', type=int, default=100000)      # 12000 - 50000
+    parser.add_argument('--warm_iter', type=int, default=10000)         
+    parser.add_argument('--cos_max_iter', type=int, default=100000)    
     parser.add_argument('--min_lr_ratio', type=float, default=0.02)
 
     args = parser.parse_args()

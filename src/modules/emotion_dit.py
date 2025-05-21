@@ -276,6 +276,8 @@ class DitTalkingHead(nn.Module):
             cfg_cond, cfg_scale = [], []
         # cfg_cond=('audio','emotion')   cfg_scale=(1.15,1.15)    tuple类型
 
+        print(f'cfg_cond: {cfg_cond}, cfg_scale: {cfg_scale}')  # cfg_cond: ['audio', 'emotion'], cfg_scale: [1.15, 1.15]
+
         # 根据输入audio_or_feat，提取音频特征  (N, L=100, feature_dim=256)  L:帧数
         if audio_or_feat.ndim == 2:   # 原始音频  推理时是这个！！！   [1, sub_audio_len=64000]    sub_audio_len：该序列对应的音频的采样数（长度） 
             # Extract audio features

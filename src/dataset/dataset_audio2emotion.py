@@ -8,7 +8,7 @@ sys.path.append(os.path.dirname(os.path.abspath("../")))
 emo_list = ['angry', 'contempt', 'disgusted', 'fear', 'happy', 'neutral', 'sad', 'surprised']
 
 class AudioEmotionDataset(Dataset):
-    def __init__(self, root_dir='src/my_prepare', np_dict = 'front_emotion2vec.pkl', train_txt="all_train.txt"):
+    def __init__(self, root_dir='src/my_prepare', np_dict = 'front_emotion2vec.pkl', train_txt="train.txt"):
         self.audio_data_list = pickle.load(open(os.path.join(root_dir, np_dict), 'rb'))
         txt_path = os.path.join(root_dir, train_txt)
         with open(txt_path, "r", encoding="utf-8") as file:

@@ -25,19 +25,16 @@ from .utils.camera import get_rotation_matrix
 from .utils.video import images2video, add_audio_to_video
 from .utils.crop import prepare_paste_back, paste_back
 from .utils.io import load_image_rgb, resize_to_limit, load, dump
-from .utils.helper import mkdir, basename, dct2device, is_image, calc_motion_multiplier, is_template, remove_suffix
+from .utils.helper import mkdir, basename, dct2device, is_image, calc_motion_multiplier, remove_suffix
 from .utils.rprint import rlog as log
-from .utils.viz import viz_lmk, plot_3d_scatter, plot_vectors, plot_vector_pairs
 from .ADEF_wrapper import ADEFWrapper         # 独立分布+情感归一化
 
 ############       这个写在config里面应该更好
 emo_list = ['angry', 'contempt', 'disgusted', 'fear', 'happy', 'neutral', 'sad', 'surprised']
-emo_label = ['ang',  'con',  'dis',  'fea',  'hap',  'neu',  'sad',  'sur']
 
 def make_abs_path(fn):      # 生成绝对路径
     return osp.join(osp.dirname(osp.realpath(__file__)), fn)
 
-import numpy as np
 from scipy.optimize import curve_fit
 
 def smooth_driving_template_cosine(left_frame, right_frame, driving_template_dct):
@@ -139,19 +136,19 @@ class ADEFPipeline(object):
             args.emotype = emo_list[argmax]
             print(f"Emotion: {args.emotype}")
 
-# ####### 我写的 ######## 从模版中读取motion  （用于验证，加速驱动）        ##########################
-#         wfp_template = remove_suffix(args.audio) + '.pkl'     # 保存到指定目录
-#         if os.path.exists(wfp_template):      # 从pkl模版加载
-#             log(f"Load from template: {wfp_template}.", style='bold green')
-#             driving_template_dct = load(wfp_template)
-#         else:
-# ######## generate motion sequence 根据音频生成运动序列   （创新之处）########
-#             driving_template_dct = self.adef_wrapper.gen_motion_sequence(args)   # {'n_frames':XX, 'output_fps':XX, 'motions':[{exp,t,...},{},{},...,{}共n_frames个字典]}
-#             dump(wfp_template, driving_template_dct)
-#             log(f"Dump motion template to {wfp_template}")
-
-#########  原本实现 #########################
-        driving_template_dct = self.adef_wrapper.gen_motion_sequence(args)
+        if args.save_results:
+        #  从模版中读取motion  （用于验证，加速驱动）        
+            wfp_template = remove_suffix(args.audio) + '.pkl'     # 保存到指定目录
+            if os.path.exists(wfp_template):      # 从pkl模版加载
+                log(f"Load from template: {wfp_template}.", style='bold green')
+                driving_template_dct = load(wfp_template)
+            else:
+                # generate motion sequence 根据音频生成运动序列 
+                driving_template_dct = self.adef_wrapper.gen_motion_sequence(args)   # {'n_frames':XX, 'output_fps':XX, 'motions':[{exp,t,...},{},{},...,{}共n_frames个字典]}
+                dump(wfp_template, driving_template_dct)
+                log(f"Dump motion template to {wfp_template}")
+        else:
+            driving_template_dct = self.adef_wrapper.gen_motion_sequence(args)
         n_frames = driving_template_dct['n_frames']                        # （音频对应的）总帧数
         print(n_frames)
 
@@ -291,7 +288,8 @@ class ADEFPipeline(object):
             # 扭曲解码（图像生成）：外观特征，源隐式关键点，当前帧驱动隐式关键点
             out = self.adef_wrapper.warp_decode(f_s, x_s, x_d_i_new)    
             I_p_i = self.adef_wrapper.parse_output(out['out'])[0]  # 512x512x3, uint8   生成的图像（可显示的那种0~255）
-            I_p_lst.append(I_p_i)         # 图像列表（还没粘贴回完整原图空间）
+            if i>1 and i<n_frames-1:   # 只保存中间的帧
+                I_p_lst.append(I_p_i)         # 图像列表（还没粘贴回完整原图空间）
 
             if inf_cfg.flag_pasteback and inf_cfg.flag_do_crop and inf_cfg.flag_stitching:     # 需要粘贴回；需要被裁剪；需要被缝合
                 # TODO: the paste back procedure is slow, considering optimize it using multi-threading or GPU  回粘贴过程很慢；考虑使用多线程或GPU对其进行优化
@@ -308,6 +306,6 @@ class ADEFPipeline(object):
         else:
             print(f'图像数量（帧数）    {len(I_p_lst)}')
             images2video(I_p_lst, wfp=temp_video, fps=inf_cfg.output_fps)
-        final_video = osp.join(args.output_dir, f'{basename(args.reference)}_{basename(args.audio)}.mp4')
+        final_video = osp.join(args.output_dir, f'{basename(args.reference)}_{basename(args.audio)}_{args.emotype}.mp4')
         add_audio_to_video(temp_video, args.audio, final_video)     # 添加音轨
         return final_video

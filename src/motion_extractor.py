@@ -6,7 +6,6 @@ import cv2; cv2.setNumThreads(0); cv2.ocl.setUseOpenCL(False)
 import numpy as np
 import os
 import os.path as osp
-import tyro
 import subprocess
 from rich.progress import track
 
@@ -18,7 +17,6 @@ from .utils.camera import get_rotation_matrix
 from .utils.video import  get_fps
 from .utils.io import load_video, dump
 from .utils.helper import is_video, is_template, remove_suffix, is_square_video
-from .utils.rprint import rlog as log
 from .ADEF_wrapper import ADEFWrapper
 
 '''

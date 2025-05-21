@@ -26,6 +26,8 @@ class ArgumentConfig(PrintableConfig):
 
     use_emo_analyzer: Literal[True, False] = True  # whether to use emotion analyzer
 
+    save_results: Literal[True, False] = False  # 是否保存DiT的生成结果
+
     ########## inference arguments 推理参数 ##########
     flag_use_half_precision: bool = False  # whether to use half precision (FP16). If black boxes appear, it might be due to GPU incompatibility; set to False.
     device_id: int = 1  # gpu device id

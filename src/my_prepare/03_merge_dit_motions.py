@@ -2,9 +2,9 @@
 import pickle
 from tqdm import tqdm
 
-with open(f"all_train.txt", "r") as f:
+with open(f"train.txt", "r") as f:
     train_data = [line.strip() for line in f.readlines()]
-with open(f"all_test.txt", "r") as f:
+with open(f"test.txt", "r") as f:
     test_data = [line.strip() for line in f.readlines()]
 data = train_data + test_data
 

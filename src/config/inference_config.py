@@ -42,6 +42,8 @@ class InferenceConfig(PrintableConfig):
     enhance_level: int = 1  # emotion enhancer level, 1,2,3
 
     use_emo_analyzer: bool = True  # whether to use emotion analyzer
+    
+    save_results: Literal[True, False] = False  # 是否保存DiT的生成结果
 
     flag_use_half_precision: bool = True      # 半精度（不必理会）
     flag_crop_driving_video: bool = False     # 裁剪驱动视频（无用）

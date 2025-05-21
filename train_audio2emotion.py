@@ -1,4 +1,3 @@
-# 示例主函数
 from src.dataset import infinite_data_loader
 from src.dataset.dataset_audio2emotion import AudioEmotionDataset
 from src.modules.audio2emotion import Audio2EmotionModel

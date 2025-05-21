@@ -6,7 +6,6 @@
 
 import contextlib
 import os.path as osp
-import os
 import pickle
 import numpy as np
 import cv2
@@ -26,9 +25,7 @@ from .config.inference_config import InferenceConfig
 from .utils.rprint import rlog as log
 from .utils.filter import smooth_
 
-############       这个写在config里面应该更好
 emo_list = ['angry', 'contempt', 'disgusted', 'fear', 'happy', 'neutral', 'sad', 'surprised']
-emo_label = ['ang',  'con',  'dis',  'fea',  'hap',  'neu',  'sad',  'sur']
 
 class ADEFWrapper(object):
     def __init__(self, inference_cfg: InferenceConfig):
@@ -85,7 +82,7 @@ class ADEFWrapper(object):
         self.n_audio_samples = round(self.audio_unit * self.n_motions)
         self.pad_mode = self.motion_generator_args.pad_mode
         self.use_indicator = self.motion_generator_args.use_indicator
-        self.templete_dict = pickle.load(open(inference_cfg.motion_template_path, 'rb'))
+        self.template_dict = pickle.load(open(inference_cfg.motion_template_path, 'rb'))
 
         # #### 0420情感增强
         self.emo_ehance = inference_cfg.use_emo_enhancer
@@ -415,7 +412,7 @@ class ADEFWrapper(object):
             audio_in = audio[round(start_idx * self.audio_unit):round(end_idx * self.audio_unit)].unsqueeze(0)  # audio_in: 根据音频的子序列索引提取音频片段，并增加一个维度以形成 (1, n_samples_in_subdivision) 的形状。
             # shape: [1, self.n_audio_samples = audio_len / n_subdivision]   eg:[1, 64000]
 
-### --------#  这里需要加一个从音频中分析情感 # --------------------------
+            # 情感类型
             emo_index = torch.tensor(emo_list.index(args.emotype))    # emo对应的索引值    # (B=1,)
             emo_index = emo_index.unsqueeze(0).to(self.device)   # 扩展维度并移动到指定设备（例如 GPU）  
   
@@ -434,12 +431,12 @@ class ADEFWrapper(object):
             prev_motion_feat = motion_feat[:, -self.n_prev_motions:].clone()        # copy临近的n_prev_motions=0帧，先前的运动特征  (N=1, L=10, motion_feat_dim=73)
             prev_audio_feat = prev_audio_feat[:, -self.n_prev_motions:]             # copy，作为先前的音频特征                      (N=1, L=10, feature_dim=256)
 
-#### 20250420 情感增强
+            #### 情感增强
             if self.emo_ehance:
                 emo_level = torch.tensor([args.enhance_level-1],dtype=torch.long).to(self.device)
                 delta_emo = self.emo_enhancer(motion_feat[:, self.n_prev_motions:, :63], emo_index, emo_level)
                 motion_feat[:, self.n_prev_motions:, :63] = motion_feat[:, self.n_prev_motions:, :63] + delta_emo.detach()
-#### ------------------------
+
             motion_coef = motion_feat         #  运动系数 "coefficient"（系数）  (N=1, L=100, motion_feat_dim=73)
             if i == n_subdivision - 1 and n_padding_frames > 0:         # 最后一段音频序列
                 motion_coef = motion_coef[:, :-n_padding_frames]  # delete padded frames   删除右侧新增的n_padding_frames帧  (N=1, L - n_padding_frames, motion_feat_dim=73)
@@ -448,9 +445,9 @@ class ADEFWrapper(object):
             # motion_coef = self.reformat_motion(args, motion_coef)
 
         motion_coef = motion_coef.squeeze() #.cpu().numpy().astype(np.float32)     # 去除张量中所有尺寸为1的维度。(n_frames, n_features=70)
+        
         motion_list = []              # 运动列表
-        # Emotion_template_dict = self.templete_dict[emo_list.index(args.emotype)]
-        Emotion_template_dict = self.templete_dict
+        Emotion_template_dict = self.template_dict
         for idx in track(range(motion_coef.shape[0]), description='🚀Generating Motion Sequence...', total=motion_coef.shape[0]):    # 总帧数
             # 按照模板字典中的标准差和均值进行反归一化（从 0~1 到各自的范围）
             exp = motion_coef[idx][:63].cpu() * Emotion_template_dict["std_exp"] + Emotion_template_dict["mean_exp"]    # [63]
