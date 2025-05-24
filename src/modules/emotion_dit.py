@@ -69,7 +69,6 @@ class DitTalkingHead(nn.Module):
         self.n_motions = n_motions # 当前motion100个, window_length, T_w   窗口长度
         self.n_prev_motions = n_prev_motions # 前续motion
         self.feature_dim = feature_dim
-        # self.emo_classes = emo_classes
 
         # Audio encoder  音频编码器（音频->向量）
         self.audio_model = audio_model         # hubert
@@ -96,11 +95,11 @@ class DitTalkingHead(nn.Module):
         # 音频编码器的输出通常是一个形状为 [batch_size, seq_len, 768] 的张量，其中 768 是编码器输出的特征维度。   seq_len这里为帧数
         if architecture == 'decoder':
             self.audio_feature_map = nn.Linear(768, feature_dim)              # 768 -> 256
-            self.start_audio_feat = nn.Parameter(torch.randn(1, self.n_prev_motions, feature_dim))        # shape：（1, 25, feature_dim=256） 初始随机的音频特征向量
+            self.start_audio_feat = nn.Parameter(torch.randn(emo_classes, self.n_prev_motions, feature_dim))        # shape：（1, 25, feature_dim=256） 初始随机的音频特征向量
         else:
             raise ValueError(f'Unknown architecture {architecture}!')
 
-        self.start_motion_feat = nn.Parameter(torch.randn(1, self.n_prev_motions, self.motion_feat_dim))  # shape：（1,  25, motion_feat_dim=70） 初始随机的运动特征向量
+        self.start_motion_feat = nn.Parameter(torch.randn(emo_classes, self.n_prev_motions, self.motion_feat_dim))  # shape：（1,  25, motion_feat_dim=70） 初始随机的运动特征向量
 
         # Diffusion model       扩散模型
         self.denoising_net = DenoisingNetwork(device=device, n_motions=self.n_motions, n_prev_motions=self.n_prev_motions, 
@@ -161,10 +160,10 @@ class DitTalkingHead(nn.Module):
 
         # 如果没有先前的运动or音频特征，则初始化一个随机值的相同shape的张量
         if prev_motion_feat is None:  # 前续motion特征 (N, n_prev_motions=10, motion_feat_dim=73 or 70)
-            prev_motion_feat = self.start_motion_feat.expand(batch_size, -1, -1)  # （1, n_prev_motions=10 or 25, motion_feat_dim=73 or 70） -> (N=8, n_prev_motions=10 or 25, motion_feat_dim=73 or 70)
+            prev_motion_feat = torch.index_select(self.start_motion_feat, 0, emo_index)  # （1, n_prev_motions=10 or 25, motion_feat_dim=73 or 70） -> (N=8, n_prev_motions=10 or 25, motion_feat_dim=73 or 70)
         pre_None = False
         if prev_audio_feat is None:  # 前续语音特征 (N, n_prev_motions=10, feature_dim=256)
-            prev_audio_feat = self.start_audio_feat.expand(batch_size, -1, -1)  # （1, n_prev_motions=10, feature_dim=256） -> (N=8, n_prev_motions=10 or 25, feature_dim=256)  
+            prev_audio_feat = torch.index_select(self.start_audio_feat, 0, emo_index)  # （1, n_prev_motions=10, feature_dim=256） -> (N=8, n_prev_motions=10 or 25, feature_dim=256)  
             pre_None = True
 
         p_AE = 0.1     # 0.1概率丢弃二者
@@ -293,11 +292,11 @@ class DitTalkingHead(nn.Module):
         # 如果没有先前的运动or音频特征（第一个音频片段），则初始化一个随机值的相同shape的张量
         if prev_motion_feat is None:  # (N, n_prev_motions=10, motion_feat_dim=73)
             # (N, n_prev_motions, d_motion)
-            prev_motion_feat = self.start_motion_feat.expand(batch_size, -1, -1) # （1, n_prev_motions=10, motion_feat_dim=73） -> (N, n_prev_motions=10, motion_feat_dim=73)
+            prev_motion_feat = torch.index_select(self.start_motion_feat, 0, emo_index) # （1, n_prev_motions=10, motion_feat_dim=73） -> (N, n_prev_motions=10, motion_feat_dim=73)
         pre_None = False
         if prev_audio_feat is None:   # (N, n_prev_motions=10, feature_dim=256)
             # (N, n_prev_motions, feature_dim)
-            prev_audio_feat = self.start_audio_feat.expand(batch_size, -1, -1)  # （1, n_prev_motions=10, feature_dim=256） -> (N, n_prev_motions=10, feature_dim=256)
+            prev_audio_feat = torch.index_select(self.start_audio_feat, 0, emo_index)  # （1, n_prev_motions=10, feature_dim=256） -> (N, n_prev_motions=10, feature_dim=256)
             pre_None = True
 
         # 当前时间步的运动特征
