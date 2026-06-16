@@ -1,0 +1,47 @@
+model_params:
+  appearance_feature_extractor_params: # the F in the paper
+    image_channel: 3       # 输入图像的通道数（例如RGB图像是3）。
+    block_expansion: 64    # 每个块的扩展因子，用于定义卷积层输出通道数
+    num_down_blocks: 2     # 下采样块的数量。
+    max_features: 512      # 网络中最大特征数的限制。
+    reshape_channel: 32    # 用于3D重塑时通道数的数量。
+    reshape_depth: 16      # 3D重塑时的深度
+    num_resblocks: 6       # 3D残差块的数量
+  motion_extractor_params: # the M in the paper
+    num_kp: 21
+    backbone: convnextv2_tiny
+  motion_generator_params:
+    motion_feat_dim: 256 
+    n_motions: 100
+    n_prev_motions: 25
+  warping_module_params: # the W in the paper
+    num_kp: 21             # 隐式关键点的数量
+    block_expansion: 64    # 卷积层扩展因子，用于控制每个卷积块的输出通道数
+    max_features: 512      # 最大特征数，用于确定网络中最大通道数的限制。
+    num_down_blocks: 2      # 下采样块的数量，
+    reshape_channel: 32      # 调整特征通道数的参数
+    estimate_occlusion_map: True     #是否生成遮挡图
+    dense_motion_params:        # 密集运动参数
+      block_expansion: 32
+      max_features: 1024
+      num_blocks: 5
+      reshape_depth: 16
+      compress: 4
+  spade_generator_params: # the G in the paper
+    upscale: 2 # represents upsample factor 256x256 -> 512x512
+    block_expansion: 64
+    max_features: 512
+    num_down_blocks: 2
+  stitching_retargeting_module_params: # the S in the paper
+    stitching:
+      input_size: 126 # (21*3)*2
+      hidden_sizes: [128, 128, 64]
+      output_size: 65 # (21*3)+2(tx,ty)
+    lip:
+      input_size: 65 # (21*3)+2
+      hidden_sizes: [128, 128, 64]
+      output_size: 63 # (21*3)
+    eye:
+      input_size: 66 # (21*3)+3
+      hidden_sizes: [256, 256, 128, 128, 64]
+      output_size: 63 # (21*3)
