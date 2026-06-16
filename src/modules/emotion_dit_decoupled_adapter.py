@@ -17,7 +17,7 @@ like the audio-only model and gives you a separate knob for emotion strength.
 
 from __future__ import annotations
 
-from typing import Iterable, Optional, Sequence, Tuple, Union
+from typing import Iterable, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -182,10 +182,12 @@ class DitTalkingHead(_AudioBaseDitTalkingHead):
         emotion_protected_dims: Optional[Union[str, Iterable[int]]] = None,
         emotion_protected_kp_indices: Optional[Union[str, Iterable[int]]] = None,
         emotion_protected_weight: float = 0.0,
+        base_start_emotion_id: Optional[int] = 5,
     ):
         # Keep the original requested conditions for logging/inference API, but
         # do not let the base DiT modulate audio with emotion.
         self.requested_guiding_conditions = guiding_conditions
+        self.base_start_emotion_id = base_start_emotion_id
         super().__init__(
             device=device,
             target=target,
@@ -202,7 +204,10 @@ class DitTalkingHead(_AudioBaseDitTalkingHead):
             guiding_conditions="audio",
             emo_classes=emo_classes,
         )
-        self.guiding_conditions = ["audio", "emotion"]
+        # Keep the inherited model truly audio-only. Store the public requested
+        # conditions separately so super().forward never sees "emotion".
+        self.guiding_conditions = ["audio"]
+        self.decoupled_guiding_conditions = ["audio", "emotion"]
         self.emotion_dropout_prob = emotion_dropout_prob
         self.decoupled_null_emotion = nn.Parameter(torch.zeros(1, 1, feature_dim))
         self.decoupled_emo_embed = nn.Embedding(emo_classes, feature_dim)
@@ -226,6 +231,24 @@ class DitTalkingHead(_AudioBaseDitTalkingHead):
         for name, param in self.named_parameters():
             param.requires_grad = trainable or name.startswith(adapter_prefixes)
 
+    def _base_emo_index(self, emo_index: Optional[torch.Tensor], batch_size: int) -> Optional[torch.Tensor]:
+        """Emotion id used only by inherited start tokens.
+
+        ``emotion_dit_prev_modi`` stores emotion-specific start audio/motion
+        tokens. For a stricter decoupled experiment, keep those start tokens at
+        a neutral id by default and let the real emotion id enter only the
+        residual adapter. Set ``base_start_emotion_id=None`` to recover the old
+        behavior.
+        """
+        if self.base_start_emotion_id is None:
+            return emo_index
+        return torch.full(
+            (batch_size,),
+            int(self.base_start_emotion_id),
+            dtype=torch.long,
+            device=self.device,
+        )
+
     def _emotion_feature(self, emo_index: Optional[torch.Tensor], batch_size: int,
                          drop_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
         if emo_index is None:
@@ -246,6 +269,7 @@ class DitTalkingHead(_AudioBaseDitTalkingHead):
 
     def forward(self, motion_feat, audio_or_feat, prev_motion_feat=None, prev_audio_feat=None,
                 time_step=None, indicator=None, emo_index=None, emotion_strength=None):
+        base_emo_index = self._base_emo_index(emo_index, motion_feat.shape[0])
         eps, base_target, prev_motion, audio_feat = super().forward(
             motion_feat,
             audio_or_feat,
@@ -253,7 +277,7 @@ class DitTalkingHead(_AudioBaseDitTalkingHead):
             prev_audio_feat=prev_audio_feat,
             time_step=time_step,
             indicator=indicator,
-            emo_index=emo_index,
+            emo_index=base_emo_index,
         )
         batch_size = motion_feat.shape[0]
         if emotion_strength is None:
@@ -270,12 +294,21 @@ class DitTalkingHead(_AudioBaseDitTalkingHead):
                motion_at_T=None, indicator=None, cfg_mode=None, cfg_cond=None,
                cfg_scale=1.15, flexibility=0, dynamic_threshold=None,
                ret_traj=False, emo_index=None, emotion_strength: float = 1.0):
-        # Run the diffusion process with audio CFG only.  The emotion delta is
+        # Run the diffusion process with audio CFG only. The emotion delta is
         # added after denoising, avoiding emotion/audio CFG interference.
         if isinstance(cfg_scale, (list, tuple)):
             base_scale = cfg_scale[0] if len(cfg_scale) > 0 else 1.15
         else:
             base_scale = cfg_scale
+        if emo_index is not None:
+            batch_size = emo_index.shape[0]
+        elif torch.is_tensor(audio_or_feat):
+            batch_size = audio_or_feat.shape[0]
+        elif prev_motion_feat is not None:
+            batch_size = prev_motion_feat.shape[0]
+        else:
+            batch_size = 1
+        base_emo_index = self._base_emo_index(emo_index, batch_size)
         motion, noise, audio_feat = super().sample(
             audio_or_feat,
             prev_motion_feat=prev_motion_feat,
@@ -288,7 +321,7 @@ class DitTalkingHead(_AudioBaseDitTalkingHead):
             flexibility=flexibility,
             dynamic_threshold=dynamic_threshold,
             ret_traj=ret_traj,
-            emo_index=emo_index,
+            emo_index=base_emo_index,
         )
         if ret_traj:
             for key in list(motion.keys()):
