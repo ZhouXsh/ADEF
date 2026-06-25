@@ -96,7 +96,7 @@ class LivePortraitMotionExtractor(object):
         # for convenience
         inf_cfg = self.adef_wrapper.inference_cfg
 
-# ------######## process driving info ########   生成motion字典----------------------------------------------------------
+        # ------######## process driving info ########   生成motion字典----------------------------------------------------------
         flag_load_from_template = is_template(args.driving)
         driving_rgb_crop_256x256_lst = None
         wfp_template = None
@@ -151,7 +151,7 @@ class LivePortraitMotionExtractor(object):
             raise Exception(f"{args.driving} does not exist!")
 
 # （处理训练视频）生成输入视频的 运动模版
-def make_motion_templete(args, driving_video, suffix=".pkl", gpu_id=0): 
+def make_motion_template(args, driving_video, suffix=".pkl", gpu_id=0): 
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)       # 让该进程只看到指定 GPU
     # print(f"Process {os.getpid()} using GPU {gpu_id} for video {driving_video}")
 
