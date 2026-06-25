@@ -1,4 +1,4 @@
-# 毕设的完全不动版本
+# 在毕设的基础上改动
 
 import argparse
 from collections import deque, defaultdict
@@ -18,14 +18,18 @@ from src.modules.emotion_level_classifier import EmotionTransformer as Classifie
 import src.utils as utils
 from src.dataset import infinite_data_loader
 from src.dataset.dataset_EmotionLevel import EmoLevelDataset
+
+# from src.modules.emotion_dit_chatgpt import DitTalkingHead
+# g_exp_name = '20260616_emotion_dit_chatgpt' 
+# device_id = 1  # 选择 GPU
+
+# from src.modules.emotion_dit_prev_modi import DitTalkingHead
+# g_exp_name = '20260615毕设去掉两层调制_prevAudio都调制_并调整sample的逻辑' 
+# device_id = 2  # 选择 GPU
+
 from src.modules.emotion_dit import DitTalkingHead
-
-# g_exp_name = '毕设备份20260613'
-# device_id = 3  # 选择 GPU
-
-g_exp_name = '毕设冻结音频编码器20260613'   # 冻结确实节省参数，不知道影不影响效果
-device_id = 2  # 选择 GPU
-
+g_exp_name = '20260625毕设去掉两层调制_修改train错误的loss累积' 
+device_id = 6  # 选择 GPU
 
 torch.cuda.set_device(device_id)  # 设置默认 GPU
 device = torch.device(f"cuda:{device_id}" if torch.cuda.is_available() else "cpu")  # 显式指定设备
@@ -39,24 +43,6 @@ def train(args, model, train_loader, val_loader, optimizer, save_dir, scheduler=
     # model
     device = model.device
     model.train()
-
-    ############
-    all_temp = pickle.load(open('pretrained_weights/ADEF/motion_template/motion_template.pkl','rb'))
-    mean_exp, std_exp = torch.tensor(all_temp['mean_exp']).to(device).unsqueeze(0).unsqueeze(0), torch.tensor(all_temp['std_exp']).to(device).unsqueeze(0).unsqueeze(0)
-    alone_temp = pickle.load(open('pretrained_weights/ADEF/motion_template/emotion_template.pkl','rb'))
-    mean_exps, std_exps = [], []
-    for i in range(len(alone_temp)):
-        mean_exps.append(torch.tensor(alone_temp[i]['mean_exp']))
-        std_exps.append(torch.tensor(alone_temp[i]['std_exp']))
-    mean_exps = torch.stack(mean_exps,dim=0).to(device)   # [8, 63]
-    std_exps = torch.stack(std_exps,dim=0).to(device)     # [8, 63]
-    norm_dict = {
-        'mean_exp': mean_exp,
-        'std_exp': std_exp,
-        'mean_exps': mean_exps,
-        'std_exps': std_exps
-    }
-    #############
 
     data_loader = infinite_data_loader(train_loader)   # 将数据加载器（train_loader）转换为一个无限循环的迭代器
     audio_unit = train_loader.dataset.audio_unit       # 每一帧的样本数  self.audio_unit = 16000. / self.coef_fps
@@ -80,9 +66,9 @@ def train(args, model, train_loader, val_loader, optimizer, save_dir, scheduler=
 
         loss_noise = 0                                    # 去噪损失
         loss_emo = torch.tensor(0, device=device)         # 情感损失
-        loss_exp = torch.tensor(0, device=device)         # 表情变形损失
-        loss_exp_v = torch.tensor(0, device=device)
-        loss_exp_s = torch.tensor(0, device=device)
+        loss_expression = torch.tensor(0, device=device)         # 表情变形损失
+        loss_exp_vel = torch.tensor(0, device=device)
+        loss_exp_smooth = torch.tensor(0, device=device)
         loss_head_angle = torch.tensor(0, device=device)
         loss_head_vel = torch.tensor(0, device=device)
         loss_head_smooth = torch.tensor(0, device=device)
@@ -141,21 +127,15 @@ def train(args, model, train_loader, val_loader, optimizer, save_dir, scheduler=
 
             exps = target[:, args.n_prev_motions:, :63].clone()   # (N,100,63)    各自归一化的
 
-            # 增强归一化
-            alone_mean = mean_exps[emo_index].unsqueeze(1)        # (N,1,63)
-            alone_std = std_exps[emo_index].unsqueeze(1)          # (N,1,63)
-
-            exps = (exps * alone_std + alone_mean - mean_exp) / (std_exp + 1e-9)             # 反归一化 再 归一化
-
             # 情感分类（情感损失）
             pred_emo, _ = classifier(exps)   # (N,100,63)  -> (N,8)
             loss_e = cross_criterion(pred_emo, emo_index)
             loss_emo = loss_emo + loss_e / 2
 
             loss_noise = loss_noise + loss_n / 2        # 前n_motions和后n_motions各占一半，因此除以2。下同
-            loss_exp = loss_exp + loss_exp / 2
-            loss_exp_v = loss_exp_v + loss_exp_v / 2.
-            loss_exp_s = loss_exp_s + loss_exp_s / 2.
+            loss_expression = loss_expression + loss_exp / 2
+            loss_exp_vel = loss_exp_vel + loss_exp_v / 2.
+            loss_exp_smooth = loss_exp_smooth + loss_exp_s / 2.
             # 预测头部姿势，且有相应的权重和loss值
             if args.target == 'sample' and predict_head_pose and args.l_head_angle > 0:
                 loss_head_angle = loss_head_angle + loss_ha / 2
@@ -177,14 +157,14 @@ def train(args, model, train_loader, val_loader, optimizer, save_dir, scheduler=
         loss = loss + loss_emo
 
         # 表情相关损失(计算级联损失时，需要乘以相应的权重)
-        loss_log['exp'].append(loss_exp.item() * args.l_exp)             # l_exp： 0.1  权重
-        loss = loss + args.l_exp * loss_exp
+        loss_log['exp'].append(loss_expression.item() * args.l_exp)             # l_exp： 0.1  权重
+        loss = loss + args.l_exp * loss_expression
 
-        loss_log['exp_vel'].append(loss_exp_v.item() * args.l_exp_vel)   # l_exp_vel： 1e-4  权重
-        loss = loss + args.l_exp_vel * loss_exp_v
+        loss_log['exp_vel'].append(loss_exp_vel.item() * args.l_exp_vel)   # l_exp_vel： 1e-4  权重
+        loss = loss + args.l_exp_vel * loss_exp_vel
 
-        loss_log['exp_smooth'].append(loss_exp_s.item() * args.l_exp_smooth)  # l_exp_smooth： 1e-4  权重
-        loss = loss + args.l_exp_smooth * loss_exp_s
+        loss_log['exp_smooth'].append(loss_exp_smooth.item() * args.l_exp_smooth)  # l_exp_smooth： 1e-4  权重
+        loss = loss + args.l_exp_smooth * loss_exp_smooth
 
         # 头部姿势相关损失(计算级联损失时，需要乘以相应的权重)
         if args.target == 'sample' and predict_head_pose and args.l_head_angle > 0:  # 采样；预测头部姿势；权重大于0
@@ -261,11 +241,11 @@ def train(args, model, train_loader, val_loader, optimizer, save_dir, scheduler=
 
         # validation  验证模型
         if (it % args.val_iter == 0 or it == 0) or it == args.max_iter:  # 每50次迭代 验证一次。 第0次和第50000次 验证一次
-            val(args, model, val_loader, it, 1, 'val', writer, norm_dict,classifier)
+            val(args, model, val_loader, it, 1, 'val', writer, classifier)
 
 # 测试部分
 @torch.no_grad()
-def val(args, model, test_loader, current_iter, n_rounds=1, mode='val', writer=None, norm_dict=None, classifier=None):
+def val(args, model, test_loader, current_iter, n_rounds=1, mode='val', writer=None,  classifier=None):
     # print("test ... ")
     is_training = model.training
     device = model.device
@@ -273,11 +253,6 @@ def val(args, model, test_loader, current_iter, n_rounds=1, mode='val', writer=N
 
     audio_unit = test_loader.dataset.audio_unit
     predict_head_pose = not args.no_head_pose
-
-    ############
-    mean_exp, std_exp = norm_dict['mean_exp'], norm_dict['std_exp']
-    mean_exps, std_exps = norm_dict['mean_exps'], norm_dict['std_exps']
-    #############
 
     loss_log = defaultdict(list)
     for test_round in range(n_rounds):     # 1  只测试一次
@@ -296,9 +271,9 @@ def val(args, model, test_loader, current_iter, n_rounds=1, mode='val', writer=N
 
             loss_noise = 0
             loss_emo = torch.tensor(0, device=device)
-            loss_exp = 0
-            loss_exp_v = 0
-            loss_exp_s = 0
+            loss_expression = 0
+            loss_exp_vel = 0
+            loss_exp_smooth = 0
             loss_head_angle = 0
             loss_head_vel = torch.tensor(0, device=device)
             loss_head_smooth = torch.tensor(0, device=device)
@@ -352,12 +327,6 @@ def val(args, model, test_loader, current_iter, n_rounds=1, mode='val', writer=N
 
                 exps = target[:, args.n_prev_motions:, :63].clone()   # (N,100,63)    各自归一化的
 
-                # 增强归一化
-                alone_mean = mean_exps[emo_index].unsqueeze(1)        # (N,1,63)
-                alone_std = std_exps[emo_index].unsqueeze(1)          # (N,1,63)
-
-                exps = (exps * alone_std + alone_mean - mean_exp) / (std_exp + 1e-9)             # 反归一化 再 归一化
-
                 # 情感分类（情感损失）
                 pred_emo, _ = classifier(exps)   # (N,100,63)  -> (N,8)
                 loss_e = cross_criterion(pred_emo, emo_index)
@@ -367,9 +336,9 @@ def val(args, model, test_loader, current_iter, n_rounds=1, mode='val', writer=N
                 loss_noise = loss_noise + loss_n / 2    # 前n_motions和后n_motions各占一半，因此除以2。下同
 
                 # exp-related loss 表情相关损失
-                loss_exp = loss_exp + loss_exp / 2
-                loss_exp_v = loss_exp_v + loss_exp_v / 2
-                loss_exp_s = loss_exp_s + loss_exp_s / 2
+                loss_expression = loss_expression + loss_exp / 2
+                loss_exp_vel = loss_exp_vel + loss_exp_v / 2
+                loss_exp_smooth = loss_exp_smooth + loss_exp_s / 2
                 
                 # head pose loss   头部姿势损失
                 if args.target == 'sample' and predict_head_pose and args.l_head_angle > 0:
@@ -388,14 +357,14 @@ def val(args, model, test_loader, current_iter, n_rounds=1, mode='val', writer=N
             loss_log['emo'].append(loss_emo.item())
             loss = loss + loss_emo
 
-            loss_log['exp'].append(loss_exp.item() * args.l_exp)
-            loss = loss + args.l_exp * loss_exp
+            loss_log['exp'].append(loss_expression.item() * args.l_exp)
+            loss = loss + args.l_exp * loss_expression
 
-            loss_log['exp_vel'].append(loss_exp_v.item() * args.l_exp_vel)
-            loss = loss + args.l_exp_vel * loss_exp_v
+            loss_log['exp_vel'].append(loss_exp_vel.item() * args.l_exp_vel)
+            loss = loss + args.l_exp_vel * loss_exp_vel
 
-            loss_log['exp_smooth'].append(loss_exp_s.item() * args.l_exp_smooth)
-            loss = loss + args.l_exp_smooth * loss_exp_s
+            loss_log['exp_smooth'].append(loss_exp_smooth.item() * args.l_exp_smooth)
+            loss = loss + args.l_exp_smooth * loss_exp_smooth
 
             if args.target == 'sample' and predict_head_pose and args.l_head_angle > 0:
                 loss_log['head_angle'].append(loss_head_angle.item() * args.l_head_angle)

@@ -1,4 +1,4 @@
-# 在毕设的基础上改动
+# 毕设的完全不动版本
 
 import argparse
 from collections import deque, defaultdict
@@ -18,18 +18,14 @@ from src.modules.emotion_level_classifier import EmotionTransformer as Classifie
 import src.utils as utils
 from src.dataset import infinite_data_loader
 from src.dataset.dataset_EmotionLevel import EmoLevelDataset
+from src.modules.emotion_dit import DitTalkingHead
 
-from src.modules.emotion_dit_chatgpt import DitTalkingHead
-g_exp_name = '20260616_emotion_dit_chatgpt' 
+g_exp_name = '毕设备份20260617'
 device_id = 1  # 选择 GPU
 
-# from src.modules.emotion_dit_prev_modi import DitTalkingHead
-# g_exp_name = '20260615毕设去掉两层调制_prevAudio都调制_并调整sample的逻辑' 
+# g_exp_name = '毕设冻结音频编码器20260613'   # 冻结确实节省参数，不知道影不影响效果
 # device_id = 2  # 选择 GPU
 
-# from src.modules.emotion_dit import DitTalkingHead
-# g_exp_name = '20260615毕设去掉两层调制' 
-# device_id = 3  # 选择 GPU
 
 torch.cuda.set_device(device_id)  # 设置默认 GPU
 device = torch.device(f"cuda:{device_id}" if torch.cuda.is_available() else "cpu")  # 显式指定设备
@@ -43,6 +39,24 @@ def train(args, model, train_loader, val_loader, optimizer, save_dir, scheduler=
     # model
     device = model.device
     model.train()
+
+    ############
+    all_temp = pickle.load(open('pretrained_weights/ADEF/motion_template/motion_template.pkl','rb'))
+    mean_exp, std_exp = torch.tensor(all_temp['mean_exp']).to(device).unsqueeze(0).unsqueeze(0), torch.tensor(all_temp['std_exp']).to(device).unsqueeze(0).unsqueeze(0)
+    alone_temp = pickle.load(open('pretrained_weights/ADEF/motion_template/emotion_template.pkl','rb'))
+    mean_exps, std_exps = [], []
+    for i in range(len(alone_temp)):
+        mean_exps.append(torch.tensor(alone_temp[i]['mean_exp']))
+        std_exps.append(torch.tensor(alone_temp[i]['std_exp']))
+    mean_exps = torch.stack(mean_exps,dim=0).to(device)   # [8, 63]
+    std_exps = torch.stack(std_exps,dim=0).to(device)     # [8, 63]
+    norm_dict = {
+        'mean_exp': mean_exp,
+        'std_exp': std_exp,
+        'mean_exps': mean_exps,
+        'std_exps': std_exps
+    }
+    #############
 
     data_loader = infinite_data_loader(train_loader)   # 将数据加载器（train_loader）转换为一个无限循环的迭代器
     audio_unit = train_loader.dataset.audio_unit       # 每一帧的样本数  self.audio_unit = 16000. / self.coef_fps
@@ -126,6 +140,12 @@ def train(args, model, train_loader, val_loader, optimizer, save_dir, scheduler=
             loss_n, loss_exp, loss_exp_v, loss_exp_s, loss_ha, loss_hc, loss_hs, loss_ht = utils.compute_loss_new(args, i == 0, motion_coef_in, noise, target, prev_motion_coef, end_idx)
 
             exps = target[:, args.n_prev_motions:, :63].clone()   # (N,100,63)    各自归一化的
+
+            # 增强归一化
+            alone_mean = mean_exps[emo_index].unsqueeze(1)        # (N,1,63)
+            alone_std = std_exps[emo_index].unsqueeze(1)          # (N,1,63)
+
+            exps = (exps * alone_std + alone_mean - mean_exp) / (std_exp + 1e-9)             # 反归一化 再 归一化
 
             # 情感分类（情感损失）
             pred_emo, _ = classifier(exps)   # (N,100,63)  -> (N,8)
@@ -241,11 +261,11 @@ def train(args, model, train_loader, val_loader, optimizer, save_dir, scheduler=
 
         # validation  验证模型
         if (it % args.val_iter == 0 or it == 0) or it == args.max_iter:  # 每50次迭代 验证一次。 第0次和第50000次 验证一次
-            val(args, model, val_loader, it, 1, 'val', writer, classifier)
+            val(args, model, val_loader, it, 1, 'val', writer, norm_dict,classifier)
 
 # 测试部分
 @torch.no_grad()
-def val(args, model, test_loader, current_iter, n_rounds=1, mode='val', writer=None,  classifier=None):
+def val(args, model, test_loader, current_iter, n_rounds=1, mode='val', writer=None, norm_dict=None, classifier=None):
     # print("test ... ")
     is_training = model.training
     device = model.device
@@ -253,6 +273,11 @@ def val(args, model, test_loader, current_iter, n_rounds=1, mode='val', writer=N
 
     audio_unit = test_loader.dataset.audio_unit
     predict_head_pose = not args.no_head_pose
+
+    ############
+    mean_exp, std_exp = norm_dict['mean_exp'], norm_dict['std_exp']
+    mean_exps, std_exps = norm_dict['mean_exps'], norm_dict['std_exps']
+    #############
 
     loss_log = defaultdict(list)
     for test_round in range(n_rounds):     # 1  只测试一次
@@ -326,6 +351,12 @@ def val(args, model, test_loader, current_iter, n_rounds=1, mode='val', writer=N
                 loss_n, loss_exp, loss_exp_v, loss_exp_s, loss_ha, loss_hc, loss_hs, loss_ht = utils.compute_loss_new(args, i == 0, motion_coef_in, noise, target, prev_motion_coef, end_idx)
 
                 exps = target[:, args.n_prev_motions:, :63].clone()   # (N,100,63)    各自归一化的
+
+                # 增强归一化
+                alone_mean = mean_exps[emo_index].unsqueeze(1)        # (N,1,63)
+                alone_std = std_exps[emo_index].unsqueeze(1)          # (N,1,63)
+
+                exps = (exps * alone_std + alone_mean - mean_exp) / (std_exp + 1e-9)             # 反归一化 再 归一化
 
                 # 情感分类（情感损失）
                 pred_emo, _ = classifier(exps)   # (N,100,63)  -> (N,8)
