@@ -78,6 +78,72 @@ class DitTalkingHead(_DitTalkingHead):
             prev_audio_feat_in.append(prev_audio_item)  # 优化CFG，2026年6月25日
         return torch.cat(audio_feat_in, dim=0), torch.cat(prev_audio_feat_in, dim=0), len(audio_feat_in)  # 优化CFG，2026年6月25日
 
+    def forward(self, motion_feat, audio_or_feat, prev_motion_feat=None, prev_audio_feat=None, time_step=None, indicator=None, emo_index=None, return_cfg_state=False):  # 优化CFG，2026年6月25日
+        batch_size = motion_feat.shape[0]  # 优化CFG，2026年6月25日
+        if audio_or_feat.ndim == 2:  # 优化CFG，2026年6月25日
+            assert audio_or_feat.shape[1] == round(16000 * self.n_motions / self.fps), f'Incorrect audio length {audio_or_feat.shape[1]}'  # 优化CFG，2026年6月25日
+            audio_feat_saved = self.extract_audio_feature(audio_or_feat)  # 优化CFG，2026年6月25日
+        elif audio_or_feat.ndim == 3:  # 优化CFG，2026年6月25日
+            assert audio_or_feat.shape[1] == self.n_motions, f'Incorrect audio feature length {audio_or_feat.shape[1]}'  # 优化CFG，2026年6月25日
+            audio_feat_saved = audio_or_feat  # 优化CFG，2026年6月25日
+        else:  # 优化CFG，2026年6月25日
+            raise ValueError(f'Incorrect audio input shape {audio_or_feat.shape}')  # 优化CFG，2026年6月25日
+        audio_feat = audio_feat_saved.clone()  # 优化CFG，2026年6月25日
+        if prev_motion_feat is None:  # 优化CFG，2026年6月25日
+            prev_motion_feat = torch.index_select(self.start_motion_feat, 0, emo_index)  # 优化CFG，2026年6月25日
+        if prev_audio_feat is None:  # 优化CFG，2026年6月25日
+            prev_audio_feat = torch.index_select(self.start_audio_feat, 0, emo_index)  # 优化CFG，2026年6月25日
+        prev_audio_feat_saved = prev_audio_feat.clone()  # 优化CFG，2026年6月25日
+        cfg_state = torch.full((batch_size,), 2, dtype=torch.long, device=self.device)  # 优化CFG，2026年6月25日
+        cfg_is_full = torch.ones(batch_size, dtype=torch.bool, device=self.device)  # 优化CFG，2026年6月25日
+        p_AE = 0.1  # 优化CFG，2026年6月25日
+        p_E = 0.55  # 优化CFG，2026年6月25日
+        if len(self.guiding_conditions) > 0:  # 优化CFG，2026年6月25日
+            assert len(self.guiding_conditions) <= 2, 'Only support 1 or 2 CFG conditions!'  # 优化CFG，2026年6月25日
+            if 'audio' in self.guiding_conditions and 'emotion' in self.guiding_conditions:  # 优化CFG，2026年6月25日
+                mask_flag = torch.rand(batch_size, device=self.device)  # 优化CFG，2026年6月25日
+                mask_uncond = mask_flag < p_AE  # 优化CFG，2026年6月25日
+                mask_audio_only = (mask_flag >= p_AE) & (mask_flag < p_E)  # 优化CFG，2026年6月25日
+                cfg_is_full = ~(mask_uncond | mask_audio_only)  # 优化CFG，2026年6月25日
+                cfg_state = torch.where(mask_uncond, torch.zeros_like(cfg_state), torch.where(mask_audio_only, torch.ones_like(cfg_state), cfg_state))  # 优化CFG，2026年6月25日
+                audio_null = self.null_audio_feat.expand(batch_size, self.n_motions, -1)  # 优化CFG，2026年6月25日
+                prev_audio_null = self.null_audio_feat.expand(batch_size, self.n_prev_motions, -1)  # 优化CFG，2026年6月25日
+                emo_null = self.null_emotion_feat.expand(batch_size, -1, -1)  # 优化CFG，2026年6月25日
+                emo_real = self.emo_embed(emo_index).unsqueeze(1)  # 优化CFG，2026年6月25日
+                audio_cond = torch.where(mask_uncond.view(-1, 1, 1), audio_null, audio_feat_saved)  # 优化CFG，2026年6月25日
+                prev_audio_cond = torch.where(mask_uncond.view(-1, 1, 1), prev_audio_null, prev_audio_feat_saved)  # 优化CFG，2026年6月25日
+                emo_cond = torch.where((mask_uncond | mask_audio_only).view(-1, 1, 1), emo_null, emo_real)  # 优化CFG，2026年6月25日
+                audio_feat = self._cfg_modulate_audio(audio_cond, emo_cond)  # 优化CFG，2026年6月25日
+                prev_audio_feat = self._cfg_modulate_audio(prev_audio_cond, emo_cond)  # 优化CFG，2026年6月25日
+            elif 'audio' in self.guiding_conditions:  # 优化CFG，2026年6月25日
+                mask_audio = torch.rand(batch_size, device=self.device) < p_AE  # 优化CFG，2026年6月25日
+                cfg_state = torch.where(mask_audio, torch.zeros_like(cfg_state), torch.ones_like(cfg_state))  # 优化CFG，2026年6月25日
+                cfg_is_full = ~mask_audio  # 优化CFG，2026年6月25日
+                audio_null = self.null_audio_feat.expand(batch_size, self.n_motions, -1)  # 优化CFG，2026年6月25日
+                prev_audio_null = self.null_audio_feat.expand(batch_size, self.n_prev_motions, -1)  # 优化CFG，2026年6月25日
+                audio_feat = torch.where(mask_audio.view(-1, 1, 1), audio_null, audio_feat_saved)  # 优化CFG，2026年6月25日
+                prev_audio_feat = torch.where(mask_audio.view(-1, 1, 1), prev_audio_null, prev_audio_feat_saved)  # 优化CFG，2026年6月25日
+            elif 'emotion' in self.guiding_conditions:  # 优化CFG，2026年6月25日
+                mask_emotion = torch.rand(batch_size, device=self.device) < p_AE  # 优化CFG，2026年6月25日
+                cfg_state = torch.where(mask_emotion, torch.zeros_like(cfg_state), cfg_state)  # 优化CFG，2026年6月25日
+                cfg_is_full = ~mask_emotion  # 优化CFG，2026年6月25日
+                emo_null = self.null_emotion_feat.expand(batch_size, -1, -1)  # 优化CFG，2026年6月25日
+                emo_real = self.emo_embed(emo_index).unsqueeze(1)  # 优化CFG，2026年6月25日
+                emo_cond = torch.where(mask_emotion.view(-1, 1, 1), emo_null, emo_real)  # 优化CFG，2026年6月25日
+                audio_feat = self._cfg_modulate_audio(audio_feat_saved, emo_cond)  # 优化CFG，2026年6月25日
+                prev_audio_feat = self._cfg_modulate_audio(prev_audio_feat_saved, emo_cond)  # 优化CFG，2026年6月25日
+        if time_step is None:  # 优化CFG，2026年6月25日
+            time_step = self.diffusion_sched.uniform_sample_t(batch_size)  # 优化CFG，2026年6月25日
+        alpha_bar = self.diffusion_sched.alpha_bars[time_step]  # 优化CFG，2026年6月25日
+        c0 = torch.sqrt(alpha_bar).view(-1, 1, 1)  # 优化CFG，2026年6月25日
+        c1 = torch.sqrt(1 - alpha_bar).view(-1, 1, 1)  # 优化CFG，2026年6月25日
+        eps = torch.randn_like(motion_feat)  # 优化CFG，2026年6月25日
+        motion_feat_noisy = c0 * motion_feat + c1 * eps  # 优化CFG，2026年6月25日
+        motion_feat_target = self.denoising_net(motion_feat_noisy, audio_feat, prev_motion_feat, prev_audio_feat, time_step, indicator)  # 优化CFG，2026年6月25日
+        if return_cfg_state:  # 优化CFG，2026年6月25日
+            return eps, motion_feat_target, motion_feat.detach(), audio_feat_saved.detach(), cfg_is_full.detach(), cfg_state.detach()  # 优化CFG，2026年6月25日
+        return eps, motion_feat_target, motion_feat.detach(), audio_feat_saved.detach()  # 优化CFG，2026年6月25日
+
     @torch.no_grad()
     def sample(self, audio_or_feat, prev_motion_feat=None, prev_audio_feat=None, motion_at_T=None,
                indicator=None, cfg_mode=None, cfg_cond=None, cfg_scale=1.15, flexibility=0,
