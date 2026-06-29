@@ -146,44 +146,33 @@ class DitTalkingHead(nn.Module):
         audio_feat = self.audio_feature_map(hidden_states)     # (N, L, 768)  ->  (N, L=100, feature_dim=256)   特征维度映射
         return audio_feat        # (N=8, L=100, feature_dim=256)        L：帧数   feature_dim：最终的音频特征维度
 
-    def _cfg_lip_mask(self, x):  # 优化CFG，2026年6月25日
-        lip_mask = torch.zeros_like(x, dtype=torch.bool)  # 优化CFG，2026年6月25日
-        if x.shape[-1] >= 63:  # 优化CFG，2026年6月25日
-            for lip_idx in [6, 12, 14, 17, 19, 20]:  # 优化CFG，2026年6月25日
-                lip_mask[..., lip_idx * 3:lip_idx * 3 + 3] = True  # 优化CFG，2026年6月25日
-        return lip_mask  # 优化CFG，2026年6月25日
-
     def _cfg_modulate_audio(self, audio_feat, emo_feat):  # 优化CFG，2026年6月25日
         emo_shift, emo_scale = self.adaLN_modulation(emo_feat).chunk(2, dim=2)  # 优化CFG，2026年6月25日
         return self.audio_norm(audio_feat) * (1 + emo_scale) + emo_shift  # 优化CFG，2026年6月25日
 
     def _cfg_make_scale(self, cfg_cond, cfg_scale):  # 优化CFG，2026年6月25日
-        raw_cfg_scale = cfg_scale  # 优化CFG，2026年6月25日
         if not isinstance(cfg_scale, list):  # 优化CFG，2026年6月25日
             cfg_scale = [cfg_scale] * len(cfg_cond)  # 优化CFG，2026年6月25日
         elif len(cfg_scale) < len(cfg_cond):  # 优化CFG，2026年6月25日
             cfg_scale = cfg_scale + [cfg_scale[-1]] * (len(cfg_cond) - len(cfg_scale))  # 优化CFG，2026年6月25日
+        else:  # 优化CFG，2026年6月25日
+            cfg_scale = cfg_scale[:len(cfg_cond)]  # 优化CFG，2026年6月25日
         if len(cfg_cond) > 0:  # 优化CFG，2026年6月25日
             cfg_cond, cfg_scale = zip(*sorted(zip(cfg_cond, cfg_scale), key=lambda x: ['audio', 'emotion'].index(x[0])))  # 优化CFG，2026年6月25日
             cfg_cond, cfg_scale = list(cfg_cond), list(cfg_scale)  # 优化CFG，2026年6月25日
         else:  # 优化CFG，2026年6月25日
             cfg_cond, cfg_scale = [], []  # 优化CFG，2026年6月25日
-        emo_lip_scale = raw_cfg_scale[len(cfg_scale)] if isinstance(raw_cfg_scale, list) and len(raw_cfg_scale) > len(cfg_scale) else 0.2  # 优化CFG，2026年6月25日
-        return cfg_cond, cfg_scale, emo_lip_scale  # 优化CFG，2026年6月25日
+        return cfg_cond, cfg_scale, None  # 优化CFG，2026年6月25日
 
-    def _cfg_target_theta(self, results, cfg_cond, cfg_scale, emo_lip_scale):  # 优化CFG，2026年6月25日
+    def _cfg_target_theta(self, results, cfg_cond, cfg_scale, emo_lip_scale=None):  # 优化CFG，2026年6月25日
         result_uncond = results[0][:, -self.n_motions:]  # 优化CFG，2026年6月25日
         if 'audio' in cfg_cond and 'emotion' in cfg_cond and len(results) == 3:  # 优化CFG，2026年6月25日
             result_audio = results[cfg_cond.index('audio') + 1][:, -self.n_motions:]  # 优化CFG，2026年6月25日
             result_full = results[cfg_cond.index('emotion') + 1][:, -self.n_motions:]  # 优化CFG，2026年6月25日
             audio_scale = cfg_scale[cfg_cond.index('audio')]  # 优化CFG，2026年6月25日
             emotion_scale = cfg_scale[cfg_cond.index('emotion')]  # 优化CFG，2026年6月25日
-            delta_audio = result_audio - result_uncond  # 优化CFG，2026年6月25日
-            delta_emo = result_full - result_audio  # 优化CFG，2026年6月25日
-            lip_mask = self._cfg_lip_mask(result_uncond)  # 优化CFG，2026年6月25日
-            target_theta = result_uncond + audio_scale * delta_audio  # 优化CFG，2026年6月25日
-            target_theta = target_theta + emotion_scale * delta_emo.masked_fill(lip_mask, 0)  # 优化CFG，2026年6月25日
-            target_theta = target_theta + emo_lip_scale * delta_emo.masked_fill(~lip_mask, 0)  # 优化CFG，2026年6月25日
+            target_theta = result_uncond + audio_scale * (result_audio - result_uncond)  # 优化CFG，2026年6月25日
+            target_theta = target_theta + emotion_scale * (result_full - result_audio)  # 优化CFG，2026年6月25日
             return target_theta  # 优化CFG，2026年6月25日
         target_theta = result_uncond  # 优化CFG，2026年6月25日
         for i in range(0, len(results) - 1):  # 优化CFG，2026年6月25日

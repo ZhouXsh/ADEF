@@ -19,7 +19,7 @@ class PositionalEncoding(nn.Module):
         self.register_buffer('pe', pe)  # (1, max_len=600, d_model=256)  注册缓冲区，内容不变
 
     def forward(self, x):    # x: (N, L_p + L, feature_dim=256)
-        x = x + self.pe[:, x.shape[1], :]  #  (N, L_p + L, feature_dim=256) +  (1, L_p + L=110<600, d_model=256)  广播后相加 = (N, L_p + L, feature_dim=256) 
+        x = x + self.pe[:, :x.shape[1], :]  #  (N, L_p + L, feature_dim=256) +  (1, L_p + L=110<600, d_model=256)  广播后相加 = (N, L_p + L, feature_dim=256) 
         return self.dropout(x)     # 丢弃，减少过拟合风险  (N, L_p + L, feature_dim=256) 
 
 # Encoder-Decoder掩码
