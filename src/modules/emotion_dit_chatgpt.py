@@ -498,7 +498,7 @@ class DitTalkingHead(nn.Module):
                  audio_model: str = "hubert", feature_dim: int = 512,
                  n_diff_steps: int = 500, diff_schedule: str = "cosine",
                  cfg_mode: str = "incremental",
-                 guiding_conditions: str = "audio,",
+                 guiding_conditions: str = "audio,emotion",
                  # --- ADEF_remake legacy / JoyVASA extensions ---
                  emotion_labels: Optional[Union[str, Sequence[str]]] = None,
                  num_emotions: Optional[int] = None,

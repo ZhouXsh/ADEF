@@ -116,7 +116,7 @@ class DitTalkingHead(nn.Module):
             audio_feat_dim = feature_dim         # 256
             # self.null_audio_feat 就会作为一个学习的参数，其形状为 [1, 1, feature_dim=256]。这是一个占位符，用来在条件音频的引导下生成对应的运动特征。
             self.null_audio_feat = nn.Parameter(torch.randn(1, 1, audio_feat_dim)) # 1, 1, 256
-            self.audio_norm = nn.LayerNorm(audio_feat_dim, eps=1e-5)
+            self.audio_norm = nn.LayerNorm(audio_feat_dim, eps=1e-9)
         if 'emotion' in self.guiding_conditions:   # True
             emotion_feat_dim = feature_dim         # 512
             self.null_emotion_feat = nn.Parameter(torch.zeros(1, 1, emotion_feat_dim)) # 1, 1, 512

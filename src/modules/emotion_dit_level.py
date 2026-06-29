@@ -83,7 +83,7 @@ class DitTalkingHead(nn.Module):
 
         if 'audio' in self.guiding_conditions:
             self.null_audio_feat = nn.Parameter(torch.randn(1, 1, feature_dim))
-            self.audio_norm = nn.LayerNorm(feature_dim, eps=1e-5)
+            self.audio_norm = nn.LayerNorm(feature_dim, eps=1e-9)
 
         if 'emotion' in self.guiding_conditions:
             self.null_emotion_feat = nn.Parameter(torch.zeros(1, 1, feature_dim))
