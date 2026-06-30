@@ -54,8 +54,8 @@ def evaluate_item(row, args):
         code, stdout, stderr = run_external_template(args.external_cmd, video, audio, args.syncnet_checkpoint, metric_path)
     else:
         raise RuntimeError(
-            "Please provide --external_cmd for your installed SyncNet/Wav2Lip fork. "
-            "Example: --external_cmd 'python third_party/Wav2Lip/evaluation/scores_LSE.py --data_root {video} --checkpoint_path {checkpoint} --out {out}'"
+            "请为你本地安装的 SyncNet/Wav2Lip fork 提供 --external_cmd。"
+            "示例：--external_cmd 'python third_party/Wav2Lip/evaluation/scores_LSE.py --data_root {video} --checkpoint_path {checkpoint} --out {out}'"
         )
     metrics = parse_metric_file(metric_path)
     return {
@@ -74,9 +74,9 @@ def main():
     parser.add_argument("--video", type=str, default="")
     parser.add_argument("--audio", type=str, default="")
     parser.add_argument("--manifest", type=str, default="")
-    parser.add_argument("--wav2lip_root", type=str, default="", help="kept for documentation; use --external_cmd for exact fork")
+    parser.add_argument("--wav2lip_root", type=str, default="", help="保留为文档说明字段；建议用 --external_cmd 精确指定你的 fork 命令")
     parser.add_argument("--syncnet_checkpoint", type=str, default="")
-    parser.add_argument("--external_cmd", type=str, default="", help="command template with {video},{audio},{checkpoint},{out}")
+    parser.add_argument("--external_cmd", type=str, default="", help="包含 {video},{audio},{checkpoint},{out} 的命令模板")
     parser.add_argument("--out", type=str, required=True)
     args = parser.parse_args()
 
