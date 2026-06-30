@@ -1,2 +1,2 @@
 # coding: utf-8
-"""Shared utilities for ADEF evaluation scripts."""
+"""ADEF 评估脚本共享工具。"""
