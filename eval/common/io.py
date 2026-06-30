@@ -1,5 +1,5 @@
 # coding: utf-8
-"""Video, audio, JSON and manifest helpers for evaluation scripts."""
+"""评估脚本使用的视频、音频、JSON 与 manifest 辅助函数。"""
 
 from __future__ import annotations
 
@@ -25,10 +25,10 @@ def write_json(obj, path: str | Path) -> None:
 
 
 def read_manifest(path: str | Path) -> List[Dict[str, str]]:
-    """Read a txt list or csv manifest.
+    """读取 txt 列表或 csv manifest。
 
-    Txt format: one video path per line.
-    Csv format: columns may include generated, reference, audio, label.
+    txt 格式：每行一个视频路径。
+    csv 格式：可包含 generated、reference、audio、label 等列。
     """
     path = Path(path)
     if path.suffix.lower() == ".csv":
@@ -104,7 +104,7 @@ def sample_frames(video_path: str | Path, num_frames: int = 32, rgb: bool = True
 
 
 def extract_audio(video_path: str | Path, out_wav: Optional[str | Path] = None, sr: int = 16000) -> str:
-    """Extract mono wav using ffmpeg and return the output path."""
+    """使用 ffmpeg 提取单声道 wav，并返回输出路径。"""
     if out_wav is None:
         tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
         out_wav = tmp.name
