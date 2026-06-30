@@ -1,5 +1,5 @@
 # coding: utf-8
-"""Face landmark helpers based on MediaPipe FaceMesh."""
+"""基于 MediaPipe FaceMesh 的人脸关键点工具函数。"""
 
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 import cv2
 import numpy as np
 
-# MediaPipe FaceMesh semantic subsets. These indices are MediaPipe's 468-point mesh,
-# not LivePortrait's 21 expression keypoints.
+# MediaPipe FaceMesh 的语义子集。这里的编号来自 MediaPipe 468 点网格，
+# 不是 LivePortrait 的 21 个 expression keypoint。
 MP_MOUTH_OUTER = [61, 146, 91, 181, 84, 17, 314, 405, 321, 375, 291, 308, 324, 318, 402, 317, 14, 87, 178, 88, 95]
 MP_MOUTH_INNER = [78, 191, 80, 81, 82, 13, 312, 311, 310, 415, 308, 324, 318, 402, 317, 14, 87, 178, 88, 95]
 MP_LEFT_EYE = [33, 160, 158, 133, 153, 144]
@@ -21,7 +21,7 @@ MP_RIGHT_BROW = [336, 296, 334, 293, 300]
 
 @dataclass
 class LandmarkSequence:
-    landmarks: np.ndarray  # [T, N, 3], normalized x/y/z
+    landmarks: np.ndarray  # [T, N, 3]，归一化 x/y/z 坐标
     frame_indices: List[int]
     fps: float
     image_size: Tuple[int, int]
@@ -96,7 +96,7 @@ def pairwise_distance(points: np.ndarray, a: int, b: int, xy_only: bool = True) 
 
 
 def mouth_opening(landmarks: np.ndarray) -> np.ndarray:
-    """Approximate mouth opening from upper/lower lip distances."""
+    """根据上唇 / 下唇距离近似估计嘴部开合程度。"""
     vertical_1 = pairwise_distance(landmarks, 13, 14)
     vertical_2 = pairwise_distance(landmarks, 82, 87)
     vertical_3 = pairwise_distance(landmarks, 312, 317)
