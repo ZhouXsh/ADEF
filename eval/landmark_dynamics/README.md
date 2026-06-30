@@ -1,16 +1,16 @@
-# Landmark dynamics
+# 关键点动态指标
 
-This metric family estimates temporal naturalness from MediaPipe FaceMesh landmarks.
+该指标族基于 MediaPipe FaceMesh 关键点估计视频的时间自然度。
 
-It reports:
+它会输出：
 
-- global landmark velocity and acceleration;
-- mouth opening dynamics;
-- eyebrow dynamics;
-- mouth-specific landmark jitter;
-- eyebrow-specific landmark jitter.
+- 全局关键点速度与加速度；
+- 嘴部开合动态；
+- 眉眼动态；
+- 嘴部关键点抖动；
+- 眉眼关键点抖动。
 
-## Usage
+## 用法
 
 ```bash
 python eval/landmark_dynamics/eval_landmark_dynamics.py \
@@ -18,7 +18,7 @@ python eval/landmark_dynamics/eval_landmark_dynamics.py \
   --out eval_results/landmark_dynamics.json
 ```
 
-Batch mode:
+批量模式：
 
 ```bash
 python eval/landmark_dynamics/eval_landmark_dynamics.py \
@@ -26,8 +26,8 @@ python eval/landmark_dynamics/eval_landmark_dynamics.py \
   --out eval_results/landmark_dynamics_batch.json
 ```
 
-## Interpretation
+## 结果解释
 
-- Too-low mouth/eyebrow dynamics may indicate a stiff face.
-- Too-high acceleration/jitter may indicate unstable animation or artifacts.
-- Compare generated videos against real/reference videos from the same distribution whenever possible.
+- 嘴部或眉眼动态过低，可能说明人脸过于僵硬。
+- 加速度或抖动过高，可能说明动画不稳定或存在伪影。
+- 最好与同一分布下的真实视频或参考视频进行对比。
