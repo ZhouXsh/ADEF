@@ -83,7 +83,7 @@ def main():
     parser.add_argument("--video", type=str, default="")
     parser.add_argument("--manifest", type=str, default="")
     parser.add_argument("--num_frames", type=int, default=32)
-    parser.add_argument("--ctx_id", type=int, default=0, help="InsightFace ctx_id; use -1 for CPU")
+    parser.add_argument("--ctx_id", type=int, default=0, help="InsightFace 的 ctx_id；CPU 请设为 -1")
     parser.add_argument("--out", type=str, required=True)
     args = parser.parse_args()
 
