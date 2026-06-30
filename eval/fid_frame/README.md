@@ -1,15 +1,15 @@
-# Frame-level FID
+# 帧级 FID
 
-Frame-level FID compares generated frames with real/reference frames. It is useful for distribution-level visual quality, but it ignores temporal dynamics.
+帧级 FID 用于比较生成帧与真实 / 参考帧之间的图像分布差异。它适合评估分布级视觉质量，但不会建模时间动态。
 
-This wrapper supports two modes:
+该封装支持两种模式：
 
-1. `pytorch-fid` CLI if installed;
-2. a lightweight local implementation using `torchvision.models.inception_v3`.
+1. 如果安装了 `pytorch-fid`，可直接调用其命令行实现；
+2. 使用本地轻量实现，基于 `torchvision.models.inception_v3` 提取特征并计算 Frechet distance。
 
-## Prepare frame folders
+## 准备帧文件夹
 
-You need two image folders:
+你需要准备两个图像文件夹：
 
 ```text
 real_frames/
@@ -20,9 +20,9 @@ gen_frames/
   ...
 ```
 
-You can extract frames with ffmpeg or your own scripts. Keep sampling consistent across methods.
+可以用 ffmpeg 或你自己的脚本抽帧。不同方法之间必须保持一致的抽帧策略。
 
-## Usage
+## 用法
 
 ```bash
 python eval/fid_frame/eval_fid_frame.py \
@@ -31,7 +31,7 @@ python eval/fid_frame/eval_fid_frame.py \
   --out eval_results/fid_frame.json
 ```
 
-If `pytorch-fid` is installed, you can force external mode:
+如果已安装 `pytorch-fid`，可以强制使用外部模式：
 
 ```bash
 python eval/fid_frame/eval_fid_frame.py \
@@ -40,6 +40,6 @@ python eval/fid_frame/eval_fid_frame.py \
   --out fid.json
 ```
 
-## Notes
+## 注意事项
 
-FID is biased for small sample sizes. Use enough frames and report the sampling protocol.
+FID 在样本量很小时偏差较大。请使用足够数量的帧，并记录抽帧协议。
