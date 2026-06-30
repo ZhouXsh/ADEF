@@ -53,8 +53,8 @@ def evaluate_with_hf(video: str, label: str, pipe, num_frames: int):
         label_l = label.lower()
         conf = score_map.get(label_l, 0.0)
         if conf == 0.0:
-            # Some models use labels such as LABEL_0. Keep top1 ratio meaningful
-            # even when label strings do not match exactly.
+            # 有些模型会输出 LABEL_0 这类类别名。即使标签无法精确匹配，
+            # 也尽量让 top1 ratio 和 target confidence 的统计保持可用。
             for k, v in score_map.items():
                 if label_l in k or k in label_l:
                     conf = max(conf, v)
@@ -79,7 +79,7 @@ def main():
     parser.add_argument("--label", type=str, default="")
     parser.add_argument("--manifest", type=str, default="")
     parser.add_argument("--hf_model", type=str, default="")
-    parser.add_argument("--external_cmd", type=str, default="", help="template with {video},{label},{out}")
+    parser.add_argument("--external_cmd", type=str, default="", help="包含 {video},{label},{out} 的命令模板")
     parser.add_argument("--num_frames", type=int, default=32)
     parser.add_argument("--device", type=int, default=0)
     parser.add_argument("--out", type=str, required=True)
@@ -100,7 +100,7 @@ def main():
         elif pipe is not None:
             item = evaluate_with_hf(video, label, pipe, args.num_frames)
         else:
-            raise RuntimeError("Provide either --hf_model or --external_cmd")
+            raise RuntimeError("请提供 --hf_model 或 --external_cmd")
         rows.append(item)
 
     summary = {
