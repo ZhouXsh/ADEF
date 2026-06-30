@@ -1,9 +1,8 @@
 # coding: utf-8
-"""Batch runner for installed ADEF evaluation metrics.
+"""ADEF 评估指标批量运行脚本。
 
-This script only runs metrics whose dependencies are available and whose inputs
-are provided. It is designed as a convenience layer; for exact experiment logs,
-run each submetric directly and keep its JSON output.
+该脚本只会运行当前环境中依赖可用且输入参数齐全的指标。它主要作为便利入口；
+如果需要严格记录实验，建议仍然分别运行每个子指标，并保存各自 JSON 输出。
 """
 
 from __future__ import annotations
@@ -31,7 +30,7 @@ def main():
     parser.add_argument("--video", type=str, default="")
     parser.add_argument("--manifest", type=str, default="")
     parser.add_argument("--out_dir", type=str, required=True)
-    parser.add_argument("--skip_optional", action="store_true", help="skip metrics requiring optional packages/checkpoints")
+    parser.add_argument("--skip_optional", action="store_true", help="跳过需要可选依赖或外部 checkpoint 的指标")
     parser.add_argument("--sync_external_cmd", type=str, default="")
     parser.add_argument("--sync_checkpoint", type=str, default="")
     parser.add_argument("--emotion_hf_model", type=str, default="")
