@@ -1,98 +1,101 @@
-"""Layer-wise phase-aware emotion adapters for implicit-keypoint motion diffusion.
+"""v3: DICE-style emotion bank + audio-aware retrieval.
 
-Version v3 is the strongest variant:
-- same phase-aware emotion tokens as v2;
-- replaces the monolithic TransformerDecoder with an equivalent layer list;
-- inserts zero-init emotion hidden adapters after the last several decoder layers.
+This variant keeps the v1 DICE/IP-Adapter dual cross-attention denoiser, but
+replaces the single label embedding with a lightweight emotion code bank:
 
-This explores whether emotion should adapt only the final hidden representation (v1/v2)
-or progressively refine the high-level denoising representation in late decoder layers.
+- each emotion class owns several learnable prototype tokens;
+- a label query retrieves a class-specific emotion prototype;
+- an optional audio query retrieves a prosody-aware prototype from the same bank;
+- the final emotion memory is a small token set used by the emotion cross-attn.
+
+This is the closest ADEF-side analogue of DICE-Talk's emotion-bank retrieval,
+while remaining lightweight enough for motion diffusion.
 """
+
+from typing import Optional
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
-from .emotion_dit import DenoisingNetwork as _BaseDenoisingNetwork
-from .emotion_dit_v1 import EmotionHiddenAdapter
-from .emotion_dit_v2 import PhaseAwareEmotionEncoder, DitTalkingHead as _V2DitTalkingHead
+from .emotion_dit_v1 import DitTalkingHead as _V1DitTalkingHead
 
 
-class DenoisingNetworkV3(_BaseDenoisingNetwork):
-    def __init__(self, *args, emotion_adapter_layers: int = 2, emotion_adapter_scale: float = 0.5, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.emotion_adapter_layers = max(1, int(emotion_adapter_layers))
-        self.emotion_adapter_start = max(0, self.n_layers - self.emotion_adapter_layers)
+class EmotionBankEncoder(nn.Module):
+    def __init__(self, feature_dim: int, emo_classes: int, num_codes: int = 8):
+        super().__init__()
+        self.feature_dim = feature_dim
+        self.emo_classes = emo_classes
+        self.num_codes = num_codes
+        self.label_embed = nn.Embedding(emo_classes, feature_dim)
+        self.codebook = nn.Parameter(torch.randn(emo_classes, num_codes, feature_dim) * 0.02)
 
-        # Replace nn.TransformerDecoder by an explicit list so that we can insert
-        # emotion adapters after selected high-level decoder layers.
-        self.transformer_layers = nn.ModuleList([
-            nn.TransformerDecoderLayer(
-                d_model=self.feature_dim,
-                nhead=self.n_heads,
-                dim_feedforward=self.mlp_ratio * self.feature_dim,
-                activation='gelu',
-                batch_first=True,
-            )
-            for _ in range(self.n_layers)
-        ])
-        self.transformer = None
-        self.emotion_adapter = EmotionHiddenAdapter(
-            feature_dim=self.feature_dim,
-            n_heads=self.n_heads,
-            mlp_ratio=self.mlp_ratio,
-            adapter_scale=emotion_adapter_scale,
+        self.q_label = nn.Linear(feature_dim, feature_dim)
+        self.q_audio = nn.Linear(feature_dim, feature_dim)
+        self.k_proj = nn.Linear(feature_dim, feature_dim)
+        self.v_proj = nn.Linear(feature_dim, feature_dim)
+        self.out = nn.Sequential(
+            nn.LayerNorm(feature_dim),
+            nn.Linear(feature_dim, feature_dim),
+            nn.SiLU(),
+            nn.Linear(feature_dim, feature_dim),
         )
-        self.last_emo_residual_norm = None
+        self.token_proj = nn.Sequential(
+            nn.LayerNorm(feature_dim),
+            nn.Linear(feature_dim, feature_dim),
+            nn.SiLU(),
+            nn.Linear(feature_dim, feature_dim),
+        )
+        self.audio_mix = nn.Parameter(torch.tensor(0.0))
+        self.null_token = nn.Parameter(torch.zeros(1, 1, feature_dim))
 
-    def forward(self, motion_feat, audio_feat, prev_motion_feat, prev_audio_feat, step, indicator=None, emo_tokens=None):
-        diff_step_embedding = self.diff_step_map(self.TE.pe[0, step]).unsqueeze(1)
+    def _attend(self, query: torch.Tensor, codes: torch.Tensor) -> torch.Tensor:
+        q = query
+        k = self.k_proj(codes)
+        v = self.v_proj(codes)
+        attn = torch.softmax(torch.matmul(q, k.transpose(-1, -2)) / (q.shape[-1] ** 0.5), dim=-1)
+        return torch.matmul(attn, v)
 
-        if indicator is not None:
-            indicator = torch.cat([
-                torch.zeros((indicator.shape[0], self.n_prev_motions), device=indicator.device),
-                indicator,
-            ], dim=1)
-            indicator = indicator.unsqueeze(-1)
+    def forward(self, emo_index: torch.Tensor, audio_feat: Optional[torch.Tensor] = None,
+                drop_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+        B = emo_index.shape[0]
+        if drop_mask is not None and bool(drop_mask.all()):
+            return self.null_token.expand(B, self.num_codes + 1, -1)
 
-        if self.architecture == 'decoder':
-            feats_in = torch.cat([prev_motion_feat, motion_feat], dim=1)
+        label = self.label_embed(emo_index).unsqueeze(1)
+        codes = self.codebook[emo_index]
+        label_query = self.q_label(label)
+        label_retrieval = self._attend(label_query, codes)
+
+        if audio_feat is not None:
+            audio_summary = audio_feat.mean(dim=1, keepdim=True)
+            audio_query = self.q_audio(audio_summary)
+            audio_retrieval = self._attend(audio_query, codes)
+            retrieval = label_retrieval + torch.tanh(self.audio_mix) * audio_retrieval
         else:
-            raise ValueError(f'Unknown architecture: {self.architecture}')
+            retrieval = label_retrieval
 
-        if self.use_indicator:
-            feats_in = torch.cat([feats_in, indicator], dim=-1)
+        retrieval = self.out(retrieval)
+        tokens = self.token_proj(codes)
+        emotion_memory = torch.cat([retrieval, tokens], dim=1)
 
-        feat_out = self.feature_proj(feats_in)
-        if self.use_learnable_pe:
-            feat_out = feat_out + self.PE + diff_step_embedding
-        else:
-            feat_out = self.PE(feat_out) + diff_step_embedding
-
-        audio_feat_in = torch.cat([prev_audio_feat, audio_feat], dim=1)
-        step_emb = diff_step_embedding.squeeze(1)
-        residual_norms = []
-        for layer_idx, layer in enumerate(self.transformer_layers):
-            feat_out = layer(feat_out, audio_feat_in, memory_mask=self.alignment_mask)
-            if emo_tokens is not None and layer_idx >= self.emotion_adapter_start:
-                feat_out, emo_residual = self.emotion_adapter(feat_out, emo_tokens, step_emb)
-                residual_norms.append(emo_residual.detach().pow(2).mean())
-
-        if residual_norms:
-            self.last_emo_residual_norm = torch.stack(residual_norms).mean()
-        else:
-            self.last_emo_residual_norm = None
-
-        motion_feat_target = self.motion_dec(feat_out)
-        return motion_feat_target
+        if drop_mask is not None:
+            null = self.null_token.expand(B, emotion_memory.shape[1], -1)
+            emotion_memory = torch.where(drop_mask.view(B, 1, 1), null, emotion_memory)
+        return emotion_memory
 
 
-class DitTalkingHead(_V2DitTalkingHead):
-    """v3: phase-aware tokens + adapters inserted after the last decoder layers."""
+class DitTalkingHead(_V1DitTalkingHead):
+    """v3: emotion-bank encoding + v1 dual cross-attention denoiser."""
+
+    min_audio_cfg = 1.0
+    min_emotion_cfg = 0.10
 
     def __init__(self, device='cuda', target="sample", architecture="decoder",
                  motion_feat_dim=70, fps=25, n_motions=100, n_prev_motions=10,
                  audio_model="hubert", feature_dim=512, n_diff_steps=500,
-                 diff_schedule="cosine", cfg_mode="incremental", guiding_conditions="audio,emotion", emo_classes=8):
+                 diff_schedule="cosine", cfg_mode="incremental",
+                 guiding_conditions="audio,emotion", emo_classes=8):
         super().__init__(
             device=device,
             target=target,
@@ -109,21 +112,11 @@ class DitTalkingHead(_V2DitTalkingHead):
             guiding_conditions=guiding_conditions,
             emo_classes=emo_classes,
         )
-        self.emotion_encoder = PhaseAwareEmotionEncoder(
+        self.emotion_bank = EmotionBankEncoder(
             feature_dim=feature_dim,
             emo_classes=emo_classes,
-            n_diff_steps=n_diff_steps,
-            k_coarse=2,
-            k_dynamic=4,
-            k_detail=2,
-        )
-        self.denoising_net = DenoisingNetworkV3(
-            device=device,
-            n_motions=self.n_motions,
-            n_prev_motions=self.n_prev_motions,
-            motion_feat_dim=self.motion_feat_dim,
-            feature_dim=feature_dim,
-            emotion_adapter_layers=2,
-            emotion_adapter_scale=0.5,
-        )
-        self.to(device)
+            num_codes=8,
+        ).to(self.device)
+
+    def encode_emotion(self, emo_index, step=None, audio_feat=None, drop_mask=None):
+        return self.emotion_bank(emo_index, audio_feat=audio_feat, drop_mask=drop_mask)
