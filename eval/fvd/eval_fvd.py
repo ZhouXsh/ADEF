@@ -40,7 +40,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--real_dir", type=str, required=True)
     parser.add_argument("--gen_dir", type=str, required=True)
-    parser.add_argument("--external_cmd", type=str, required=True, help="template with {real_dir},{gen_dir},{out}")
+    parser.add_argument("--external_cmd", type=str, required=True, help="包含 {real_dir},{gen_dir},{out} 的外部命令模板")
     parser.add_argument("--out", type=str, required=True)
     args = parser.parse_args()
 
