@@ -8,12 +8,11 @@
 from __future__ import annotations
 
 import argparse
-import json
 import subprocess
 import sys
 from pathlib import Path
 
-from eval.common.io import ensure_parent, write_json
+from eval.common.io import write_json
 
 
 def run_cmd(name: str, cmd, allow_fail: bool = True):
@@ -46,6 +45,10 @@ def main():
         ("landmark_dynamics", [sys.executable, "eval/landmark_dynamics/eval_landmark_dynamics.py", *source_arg, "--out", str(out_dir / "landmark_dynamics.json")]),
         ("head_pose", [sys.executable, "eval/head_pose/eval_head_pose.py", *source_arg, "--out", str(out_dir / "head_pose.json")]),
     ]
+
+    # LMD 需要 generated/reference 成对输入，因此只在 manifest 模式下自动运行。
+    if args.manifest:
+        jobs.append(("lmd", [sys.executable, "eval/lmd/eval_lmd.py", "--manifest", args.manifest, "--out", str(out_dir / "lmd.json")]))
 
     if not args.skip_optional:
         jobs.append(("identity_arcface", [sys.executable, "eval/identity_arcface/eval_identity_arcface.py", *source_arg, "--out", str(out_dir / "identity_arcface.json")]))
