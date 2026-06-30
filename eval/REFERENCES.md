@@ -8,6 +8,12 @@
 - 推荐本地封装：`eval/sync_lse/`。
 - 轻量级替代指标：`eval/mouth_audio_corr/`。
 
+## 几何误差
+
+- LMD / Landmark Distance：说话人脸领域常用的关键点几何误差指标，适合在有逐帧对齐参考视频时评估面部运动和口型误差。
+- 推荐重点关注 `mouth_lmd`，它直接反映嘴部几何轨迹与参考视频之间的偏差。
+- 本地封装：`eval/lmd/`。
+
 ## 身份保持
 
 - ArcFace / InsightFace 风格的人脸 embedding 常用于衡量生成视频的身份保持能力。
@@ -42,6 +48,8 @@
 | 唇音同步 | LSE-D | `sync_lse` | 越低越好 |
 | 唇音同步 | LSE-C | `sync_lse` | 越高越好 |
 | 唇音同步代理 | mouth-audio corr | `mouth_audio_corr` | 越高越好 |
+| 几何误差 | full LMD | `lmd` | 越低越好 |
+| 嘴部几何误差 | mouth LMD | `lmd` | 越低越好 |
 | 身份保持 | ArcFace cosine | `identity_arcface` | 越高越好 |
 | 图像质量 | FID | `fid_frame` | 越低越好 |
 | 视频质量 | FVD | `fvd` | 越低越好 |
