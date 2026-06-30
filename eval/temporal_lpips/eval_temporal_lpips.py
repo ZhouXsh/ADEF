@@ -14,7 +14,7 @@ def load_lpips(device: str):
     try:
         import lpips
     except ImportError as exc:
-        raise ImportError("Please install lpips: pip install lpips") from exc
+        raise ImportError("请先安装 lpips：pip install lpips") from exc
     model = lpips.LPIPS(net="alex").to(device)
     model.eval()
     return model
