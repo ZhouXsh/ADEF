@@ -1,50 +1,50 @@
-# Evaluation references and implementation notes
+# 评估指标参考与实现说明
 
-This file lists the metric families used by `eval/` and the external resources that are commonly used with them.
+本文档整理 `eval/` 中使用的指标类型，以及常见的外部实现和资源。
 
-## Lip-sync
+## 唇音同步
 
-- Wav2Lip / SyncNet: LSE-D and LSE-C are widely used for audio-visual synchronization evaluation. Official repo: `https://github.com/Rudrabha/Wav2Lip`.
-- Recommended local wrapper: `eval/sync_lse/`.
-- Lightweight fallback: `eval/mouth_audio_corr/`.
+- Wav2Lip / SyncNet：LSE-D 和 LSE-C 是说话人脸领域常用的音视频同步指标。官方仓库：`https://github.com/Rudrabha/Wav2Lip`。
+- 推荐本地封装：`eval/sync_lse/`。
+- 轻量级替代指标：`eval/mouth_audio_corr/`。
 
-## Identity
+## 身份保持
 
-- ArcFace/InsightFace-style face embeddings are widely used for identity preservation.
-- ADEF already lists `insightface` in `requirements.txt`.
-- Local wrapper: `eval/identity_arcface/`.
+- ArcFace / InsightFace 风格的人脸 embedding 常用于衡量生成视频的身份保持能力。
+- ADEF 的 `requirements.txt` 中已经包含 `insightface`。
+- 本地封装：`eval/identity_arcface/`。
 
-## Distribution-level visual/video quality
+## 分布级图像 / 视频质量
 
-- FID: frame-level image distribution metric. Wrapper: `eval/fid_frame/`.
-- FVD: video distribution metric, usually using I3D features. Wrapper: `eval/fvd/`.
-- Caveat: both require sufficient sample size and consistent preprocessing.
+- FID：帧级图像分布指标。封装目录：`eval/fid_frame/`。
+- FVD：视频分布指标，通常使用 I3D 特征。封装目录：`eval/fvd/`。
+- 注意：二者都需要足够样本量，并且必须保持一致的预处理流程。
 
-## Motion naturalness and expressiveness
+## 动作自然度与表情表现
 
-- Landmark dynamics, mouth motion, eyebrow motion and head motion are useful diagnostic metrics for talking-head generation.
-- Local wrappers: `eval/landmark_dynamics/`, `eval/head_pose/`.
+- 关键点动态、嘴部运动、眉眼运动和头部运动可作为说话人脸生成的诊断性指标。
+- 本地封装：`eval/landmark_dynamics/`、`eval/head_pose/`。
 
-## Perceptual temporal consistency
+## 感知时间一致性
 
-- LPIPS between adjacent frames is a perceptual flicker proxy.
-- Local wrapper: `eval/temporal_lpips/`.
+- 相邻帧 LPIPS 可作为感知闪烁的代理指标。
+- 本地封装：`eval/temporal_lpips/`。
 
-## Emotion consistency
+## 情感一致性
 
-- Emotion recognition should be measured with a fixed classifier across all methods.
-- Local wrapper: `eval/emotion_consistency/` supports HuggingFace image classifiers or a custom external command.
+- 情感识别应在所有方法中使用同一个固定分类器。
+- 本地封装：`eval/emotion_consistency/`，支持 HuggingFace 图像分类模型或自定义外部命令。
 
-## Recommended reporting table
+## 推荐汇报表
 
-| Dimension | Metric | Script | Direction |
+| 维度 | 指标 | 脚本 | 方向 |
 |---|---|---|---|
-| Lip-sync | LSE-D | `sync_lse` | lower better |
-| Lip-sync | LSE-C | `sync_lse` | higher better |
-| Lip-sync proxy | mouth-audio corr | `mouth_audio_corr` | higher better |
-| Identity | ArcFace cosine | `identity_arcface` | higher better |
-| Image quality | FID | `fid_frame` | lower better |
-| Video quality | FVD | `fvd` | lower better |
-| Naturalness | mouth/head/eyebrow jitter | `landmark_dynamics`, `head_pose` | compare to real distribution |
-| Perceptual flicker | temporal LPIPS | `temporal_lpips` | lower, but not too static |
-| Emotion | target confidence/top1 | `emotion_consistency` | higher better |
+| 唇音同步 | LSE-D | `sync_lse` | 越低越好 |
+| 唇音同步 | LSE-C | `sync_lse` | 越高越好 |
+| 唇音同步代理 | mouth-audio corr | `mouth_audio_corr` | 越高越好 |
+| 身份保持 | ArcFace cosine | `identity_arcface` | 越高越好 |
+| 图像质量 | FID | `fid_frame` | 越低越好 |
+| 视频质量 | FVD | `fvd` | 越低越好 |
+| 自然度 | mouth/head/eyebrow jitter | `landmark_dynamics`, `head_pose` | 与真实分布对齐 |
+| 感知闪烁 | temporal LPIPS | `temporal_lpips` | 通常越低越稳定，但需避免过度静止 |
+| 情感 | target confidence/top1 | `emotion_consistency` | 越高越好 |
