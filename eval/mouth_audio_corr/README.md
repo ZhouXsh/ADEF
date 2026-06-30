@@ -1,18 +1,18 @@
-# Mouth-audio correlation
+# 嘴部运动—音频相关性
 
-This is a lightweight lip-sync proxy that does not require a pretrained SyncNet checkpoint.
+这是一个轻量级唇音同步代理指标，不需要预训练 SyncNet checkpoint。
 
-It estimates:
+它会估计：
 
-1. mouth opening from MediaPipe FaceMesh landmarks;
-2. audio dynamics from RMS and MFCC-delta envelopes;
-3. zero-lag and best-lag correlations between mouth movement and audio dynamics.
+1. 由 MediaPipe FaceMesh 关键点得到的嘴部开合程度；
+2. 由 RMS 和 MFCC-delta 得到的音频动态包络；
+3. 嘴部运动与音频动态之间的零延迟相关性和最佳延迟相关性。
 
-## Why use it
+## 为什么使用它
 
-Use this when you want a quick diagnostic signal during development. It is not a replacement for SyncNet LSE-C/LSE-D, but it is useful for comparing ADEF variants when official SyncNet inference is not installed.
+当你想在开发阶段快速得到诊断信号时，可以使用该指标。它不能替代 SyncNet LSE-C/LSE-D，但在没有安装官方 SyncNet 推理代码时，适合用于比较 ADEF 不同版本之间的相对变化。
 
-## Usage
+## 用法
 
 ```bash
 python eval/mouth_audio_corr/eval_mouth_audio_corr.py \
@@ -20,7 +20,7 @@ python eval/mouth_audio_corr/eval_mouth_audio_corr.py \
   --out eval_results/mouth_audio.json
 ```
 
-Batch mode:
+批量模式：
 
 ```bash
 python eval/mouth_audio_corr/eval_mouth_audio_corr.py \
@@ -28,11 +28,11 @@ python eval/mouth_audio_corr/eval_mouth_audio_corr.py \
   --out eval_results/mouth_audio_batch.json
 ```
 
-## Output fields
+## 输出字段
 
-- `mouth_audio_rms_corr`: Pearson correlation between mouth opening and RMS audio envelope.
-- `mouth_audio_mfcc_corr`: Pearson correlation between mouth opening and MFCC-delta envelope.
-- `best_lag_*`: best correlation within a small temporal lag window.
-- `mouth_opening_*`: mouth opening statistics.
+- `mouth_audio_rms_corr`：嘴部开合程度与 RMS 音频包络之间的 Pearson 相关系数。
+- `mouth_audio_mfcc_corr`：嘴部开合程度与 MFCC-delta 音频包络之间的 Pearson 相关系数。
+- `best_lag_*`：在一个小的时间偏移窗口内搜索得到的最佳相关性。
+- `mouth_opening_*`：嘴部开合程度的统计量。
 
-Higher correlation is usually better, but compare it within the same dataset and preprocessing pipeline.
+通常相关性越高越好，但应在相同数据集和相同预处理流程内比较。
