@@ -10,8 +10,8 @@ import numpy as np
 from eval.common.face import extract_landmark_sequence, sequence_dynamics
 from eval.common.io import iter_video_paths, summarize, write_json
 
-# Six MediaPipe landmarks commonly used for approximate head pose.
-# nose tip, chin, left eye corner, right eye corner, left mouth corner, right mouth corner
+# 常用于近似头部姿态估计的 6 个 MediaPipe 关键点：
+# 鼻尖、下巴、左眼角、右眼角、左嘴角、右嘴角。
 MP_POSE_IDXS = [1, 152, 33, 263, 61, 291]
 MODEL_POINTS = np.array([
     [0.0, 0.0, 0.0],
@@ -35,7 +35,7 @@ def rotation_vector_to_euler(rvec: np.ndarray):
         x = np.arctan2(-rmat[1, 2], rmat[1, 1])
         y = np.arctan2(-rmat[2, 0], sy)
         z = 0
-    return np.degrees([x, y, z])  # pitch, yaw, roll approximately
+    return np.degrees([x, y, z])  # 近似对应 pitch、yaw、roll
 
 
 def estimate_pose_sequence(video_path: str, stride: int = 1, max_frames: int = 0):
