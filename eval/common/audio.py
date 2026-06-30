@@ -1,5 +1,5 @@
 # coding: utf-8
-"""Audio utilities for lightweight talking-head evaluation."""
+"""轻量级说话人脸评估使用的音频工具函数。"""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ def rms_envelope(audio: np.ndarray, sr: int, fps: float) -> np.ndarray:
 def mfcc_energy_envelope(audio: np.ndarray, sr: int, fps: float, n_mfcc: int = 13) -> np.ndarray:
     hop = max(1, int(round(sr / fps)))
     mfcc = librosa.feature.mfcc(y=audio, sr=sr, n_mfcc=n_mfcc, hop_length=hop)
-    # Speech dynamics proxy: frame-to-frame MFCC magnitude change.
+    # 语音动态代理特征：逐帧 MFCC 变化幅度。
     delta = np.diff(mfcc, axis=1, prepend=mfcc[:, :1])
     env = np.linalg.norm(delta, axis=0)
     return env.astype(np.float32)
@@ -53,9 +53,9 @@ def safe_corr(a: np.ndarray, b: np.ndarray) -> float:
 
 
 def lagged_corr(a: np.ndarray, b: np.ndarray, max_lag: int = 5) -> Dict[str, float]:
-    """Return best correlation over integer frame lags.
+    """在整数帧偏移范围内返回最佳相关性。
 
-    Positive lag means b is shifted later relative to a.
+    正 lag 表示 b 相对于 a 向后移动。
     """
     a = np.asarray(a, dtype=np.float64)
     b = np.asarray(b, dtype=np.float64)
