@@ -37,8 +37,8 @@ model = AutoModel(
 
 # wav_file = f"{model.model_path}/example/test.wav"
 
-def extract_emo2vec(wav_file,output_dir):
-    model.generate(wav_file, output_dir=output_dir, granularity="utterance", extract_embedding=True)
+def extract_emo2vec(wav_file,output_dir,granularity="utterance"):       # granularity="utterance" or "frame"
+    model.generate(wav_file, output_dir=output_dir, granularity=granularity, extract_embedding=True)
     '''
     key: file_name
     labels: emotion type  ['生气/angry', '厌恶/disgusted', '恐惧/fearful', '开心/happy', '中立/neutral', '其他/other', '难过/sad', '吃惊/surprised', '<unk>']
@@ -46,9 +46,11 @@ def extract_emo2vec(wav_file,output_dir):
     feats: emo_vector       shape:(1024,)    # (768,)
     '''
 
+# extract_emo2vec('/home/Zhouxishi/VirtualMan_proj/dataset/MEAD11/videos/M003/front/angry/level_3/M003_front_angry_level_3_001.wav','/home/Zhouxishi/VirtualMan_proj/ADEF_remake/tmp/frame/global.npy','frame')
+
 def front_all():
     audio_list = []
-    root_dir = '/mnt/disk2/zhouxishi/JoyVASA/dataset/MEAD11/videos'
+    root_dir = '/home/Zhouxishi/VirtualMan_proj/dataset/MEAD11/videos'
     for id in os.listdir(root_dir):    # 演员id
         # id = os.path.join(id)
         front = os.path.join(root_dir, id, 'front')
@@ -60,8 +62,10 @@ def front_all():
                     if audio_file.endswith('.wav'):
                         audio_path = os.path.join(level_dir, audio_file)
                         audio_list.append((audio_path,level_dir))
+    audio_list = sorted(audio_list)
     for audio, level_dir in tqdm(audio_list):
-        extract_emo2vec(audio, level_dir)
+        extract_emo2vec(audio, level_dir+'/frame', granularity="frame")
+        extract_emo2vec(audio, level_dir+'/utterance', granularity="utterance")
 
 def save2dict():
     audio_list = []
@@ -92,4 +96,4 @@ def save2dict():
     print("运动数据处理完成")
 
 front_all()   # 29709
-save2dict()  # 29709
+# save2dict()  # 29709
