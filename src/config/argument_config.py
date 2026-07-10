@@ -28,24 +28,6 @@ class ArgumentConfig(PrintableConfig):
 
     save_results: Literal[True, False] = False  # 是否保存DiT的生成结果
 
-    ########## emotion2vec-conditioned motion generator ##########
-    checkpoint_MotionGenerator: Optional[str] = None
-    motion_template_path: Optional[str] = None
-    motion_generator_variant: Literal[
-        "auto",
-        "emotion_dit_e2v",
-        "emotion_dit_finalv3",
-        "emotion_dit_finalv3_two_stage",
-    ] = "auto"
-    emotion2vec_model_id: str = "iic/emotion2vec_plus_large"
-    emotion2vec_hub: Literal["ms", "modelscope", "hf", "huggingface"] = "ms"
-    emotion2vec_device: Optional[str] = None
-    emotion2vec_cache_dir: Optional[str] = None
-    emotion2vec_utterance_path: Optional[str] = None
-    emotion2vec_frame_path: Optional[str] = None
-    emotion2vec_force_extract: bool = False
-    allow_legacy_motion_cache: bool = False
-
     ########## inference arguments 推理参数 ##########
     flag_use_half_precision: bool = False  # whether to use half precision (FP16). If black boxes appear, it might be due to GPU incompatibility; set to False.
     device_id: int = 1  # gpu device id
@@ -85,8 +67,6 @@ class ArgumentConfig(PrintableConfig):
 
     ########## moiton generator 运动生成器 #############
     cfg_mode: str = "incremental" # "incremental", "independent"
-    cfg_cond: Optional[str] = None
+    cfg_cond = None
     cfg_scale: Union[float, list[float]] = 2.8
-    cfg_min: Optional[list[float]] = None
-    cfg_schedule: Optional[Literal["none", "linear", "cosine", "bell"]] = None
     is_smooth_motion: bool = True
