@@ -4,59 +4,169 @@
 from __future__ import annotations
 
 import math
+import os.path as osp
 import pickle
 
 import librosa
 import numpy as np
 import torch
 import torch.nn.functional as F
+import yaml
 from rich.progress import track
 
 from .ADEF_wrapper import ADEFWrapper
 from .config.emotion_config import global_emo_list
+from .modules.emotion_enhancer import EmotionTransformer
 from .utils.camera import get_rotation_matrix
 from .utils.e2v_motion_generator_loader import load_e2v_motion_generator
 from .utils.emotion2vec_inference import Emotion2VecExtractor
 from .utils.filter import smooth_
+from .utils.helper import load_model
 from .utils.rprint import rlog as log
+from .utils.timer import Timer
 
 
 class ADEFE2VWrapper(ADEFWrapper):
     """ADEF wrapper that supplies utterance/frame emotion2vec conditions."""
 
     def __init__(self, inference_cfg):
-        super().__init__(inference_cfg)
-        variant = getattr(inference_cfg, "motion_generator_variant", "auto")
-        self.motion_generator, self.motion_generator_args, report = load_e2v_motion_generator(
-            inference_cfg.checkpoint_MotionGenerator,
+        # Deliberately do not call ADEFWrapper.__init__: it hard-codes
+        # emotion_dit.DitTalkingHead and would try to load the E2V checkpoint
+        # with the legacy model class before this wrapper can select a variant.
+        self.inference_cfg = inference_cfg
+        self.device_id = inference_cfg.device_id
+        self.compile = inference_cfg.flag_do_torch_compile
+        if inference_cfg.flag_force_cpu:
+            self.device = "cpu"
+        else:
+            try:
+                if torch.backends.mps.is_available():
+                    self.device = "mps"
+                else:
+                    self.device = "cuda:" + str(self.device_id)
+            except Exception:
+                self.device = "cuda:" + str(self.device_id)
+
+        model_config = yaml.load(
+            open(inference_cfg.models_config, "r"), Loader=yaml.SafeLoader
+        )
+        self.appearance_feature_extractor = load_model(
+            inference_cfg.checkpoint_F,
+            model_config,
             self.device,
-            variant=variant,
+            "appearance_feature_extractor",
+        )
+        self.motion_extractor = load_model(
+            inference_cfg.checkpoint_M,
+            model_config,
+            self.device,
+            "motion_extractor",
+        )
+        self.warping_module = load_model(
+            inference_cfg.checkpoint_W,
+            model_config,
+            self.device,
+            "warping_module",
+        )
+        self.spade_generator = load_model(
+            inference_cfg.checkpoint_G,
+            model_config,
+            self.device,
+            "spade_generator",
+        )
+        if inference_cfg.checkpoint_S is not None and osp.exists(
+            inference_cfg.checkpoint_S
+        ):
+            self.stitching_retargeting_module = load_model(
+                inference_cfg.checkpoint_S,
+                model_config,
+                self.device,
+                "stitching_retargeting_module",
+            )
+        else:
+            self.stitching_retargeting_module = None
+
+        if self.compile:
+            torch._dynamo.config.suppress_errors = True
+            self.warping_module = torch.compile(
+                self.warping_module, mode="max-autotune"
+            )
+            self.spade_generator = torch.compile(
+                self.spade_generator, mode="max-autotune"
+            )
+
+        self.model_config = model_config
+        self.timer = Timer()
+
+        variant = getattr(inference_cfg, "motion_generator_variant", "auto")
+        self.motion_generator, self.motion_generator_args, report = (
+            load_e2v_motion_generator(
+                inference_cfg.checkpoint_MotionGenerator,
+                self.device,
+                variant=variant,
+            )
         )
         log(
             f"Load emotion2vec motion generator {report['variant']} "
             f"({report['loaded_keys']}/{report['model_keys']} compatible keys)."
         )
         if report["shape_mismatches"]:
-            log(f"Skipped {len(report['shape_mismatches'])} shape-mismatched keys.")
+            log(
+                f"Skipped {len(report['shape_mismatches'])} "
+                "shape-mismatched keys."
+            )
 
         self.n_motions = self.motion_generator.n_motions
         self.n_prev_motions = self.motion_generator.n_prev_motions
         self.fps = self.motion_generator.fps
         self.audio_unit = 16000.0 / self.fps
         self.n_audio_samples = round(self.audio_unit * self.n_motions)
-        self.pad_mode = getattr(self.motion_generator_args, "pad_mode", "zero") or "zero"
-        self.use_indicator = bool(getattr(self.motion_generator_args, "use_indicator", False))
-        self.template_dict = pickle.load(open(inference_cfg.motion_template_path, "rb"))
+        self.pad_mode = (
+            getattr(self.motion_generator_args, "pad_mode", "zero") or "zero"
+        )
+        self.use_indicator = bool(
+            getattr(self.motion_generator_args, "use_indicator", False)
+        )
+        self.template_dict = pickle.load(
+            open(inference_cfg.motion_template_path, "rb")
+        )
 
-        expected_dim = int(getattr(self.motion_generator_args, "e2v_dim", 1024) or 1024)
+        self.emo_ehance = inference_cfg.use_emo_enhancer
+        if self.emo_ehance:
+            enhancer_path = getattr(inference_cfg, "checkpoint_emo_enhancer", None)
+            if not enhancer_path:
+                raise ValueError(
+                    "use_emo_enhancer=True requires checkpoint_emo_enhancer"
+                )
+            enhancer = EmotionTransformer().to(self.device)
+            enhancer.load_state_dict(
+                torch.load(enhancer_path, map_location=self.device),
+                strict=False,
+            )
+            enhancer.eval()
+            self.emo_enhancer = enhancer
+
+        expected_dim = int(
+            getattr(self.motion_generator_args, "e2v_dim", 1024) or 1024
+        )
         self.e2v_extractor = Emotion2VecExtractor(
-            model_id=getattr(inference_cfg, "emotion2vec_model_id", "iic/emotion2vec_plus_large"),
+            model_id=getattr(
+                inference_cfg,
+                "emotion2vec_model_id",
+                "iic/emotion2vec_plus_large",
+            ),
             hub=getattr(inference_cfg, "emotion2vec_hub", "ms"),
             device=getattr(inference_cfg, "emotion2vec_device", None),
             expected_dim=expected_dim,
         )
 
-    def _extract_e2v(self, args, raw_audio_samples, padded_clip_frames, total_window_frames):
+    def _extract_e2v(
+        self,
+        args,
+        raw_audio_samples,
+        padded_clip_frames,
+        total_window_frames,
+    ):
         utt, frame, paths = self.e2v_extractor.extract(
             args.audio,
             utterance_path=getattr(args, "emotion2vec_utterance_path", None),
@@ -89,15 +199,25 @@ class ADEFE2VWrapper(ADEFWrapper):
 
         clip_len = int(len(audio) / 16000 * self.fps)
         stride = self.n_motions
-        n_subdivision = 1 if clip_len <= stride else math.ceil(clip_len / stride)
+        n_subdivision = (
+            1 if clip_len <= stride else math.ceil(clip_len / stride)
+        )
         total_window_frames = n_subdivision * self.n_motions
-        n_padding_audio_samples = self.n_audio_samples * n_subdivision - len(audio)
-        n_padding_frames = math.ceil(max(0, n_padding_audio_samples) / self.audio_unit)
+        n_padding_audio_samples = (
+            self.n_audio_samples * n_subdivision - len(audio)
+        )
+        n_padding_frames = math.ceil(
+            max(0, n_padding_audio_samples) / self.audio_unit
+        )
         if n_padding_audio_samples > 0:
             if self.pad_mode == "zero":
                 audio = F.pad(audio, (0, n_padding_audio_samples), value=0)
             elif self.pad_mode == "replicate":
-                audio = F.pad(audio, (0, n_padding_audio_samples), value=float(audio[-1]))
+                audio = F.pad(
+                    audio,
+                    (0, n_padding_audio_samples),
+                    value=float(audio[-1]),
+                )
             else:
                 raise ValueError(f"Unknown pad mode: {self.pad_mode}")
 
@@ -111,9 +231,12 @@ class ADEFE2VWrapper(ADEFWrapper):
             emo_index_value = global_emo_list.index(args.emotype)
         except ValueError as error:
             raise ValueError(
-                f"Unknown emotion '{args.emotype}', choose from {global_emo_list}"
+                f"Unknown emotion '{args.emotype}', choose from "
+                f"{global_emo_list}"
             ) from error
-        emo_index = torch.tensor([emo_index_value], dtype=torch.long, device=self.device)
+        emo_index = torch.tensor(
+            [emo_index_value], dtype=torch.long, device=self.device
+        )
 
         coef_list = []
         prev_motion_feat = None
@@ -124,12 +247,20 @@ class ADEFE2VWrapper(ADEFWrapper):
         for i in range(n_subdivision):
             start_idx = i * stride
             end_idx = start_idx + self.n_motions
-            indicator = torch.ones((1, self.n_motions), device=self.device) if self.use_indicator else None
-            if indicator is not None and i == n_subdivision - 1 and n_padding_frames > 0:
+            indicator = (
+                torch.ones((1, self.n_motions), device=self.device)
+                if self.use_indicator else None
+            )
+            if (
+                indicator is not None
+                and i == n_subdivision - 1
+                and n_padding_frames > 0
+            ):
                 indicator[:, -n_padding_frames:] = 0
 
             audio_in = audio[
-                round(start_idx * self.audio_unit):round(end_idx * self.audio_unit)
+                round(start_idx * self.audio_unit):
+                round(end_idx * self.audio_unit)
             ].unsqueeze(0)
             emo_frame_feat = frame_timeline[:, start_idx:end_idx]
 
@@ -147,22 +278,29 @@ class ADEFE2VWrapper(ADEFWrapper):
                 cfg_schedule=getattr(args, "cfg_schedule", None),
             )
             if i == 0:
-                motion_feat, noise, prev_audio_feat = self.motion_generator.sample(
-                    audio_in,
-                    **kwargs,
+                motion_feat, noise, prev_audio_feat = (
+                    self.motion_generator.sample(audio_in, **kwargs)
                 )
             else:
-                motion_feat, noise, prev_audio_feat = self.motion_generator.sample(
-                    audio_in,
-                    prev_motion_feat,
-                    prev_audio_feat,
-                    noise,
-                    **kwargs,
+                motion_feat, noise, prev_audio_feat = (
+                    self.motion_generator.sample(
+                        audio_in,
+                        prev_motion_feat,
+                        prev_audio_feat,
+                        noise,
+                        **kwargs,
+                    )
                 )
 
-            prev_motion_feat = motion_feat[:, -self.n_prev_motions:].clone()
-            prev_audio_feat = prev_audio_feat[:, -self.n_prev_motions:].clone()
-            prev_emo_frame_feat = emo_frame_feat[:, -self.n_prev_motions:].clone()
+            prev_motion_feat = motion_feat[
+                :, -self.n_prev_motions:
+            ].clone()
+            prev_audio_feat = prev_audio_feat[
+                :, -self.n_prev_motions:
+            ].clone()
+            prev_emo_frame_feat = emo_frame_feat[
+                :, -self.n_prev_motions:
+            ].clone()
 
             motion_coef = motion_feat
             if i == n_subdivision - 1 and n_padding_frames > 0:
@@ -179,17 +317,29 @@ class ADEFE2VWrapper(ADEFWrapper):
         ):
             coef = motion_coef[idx].detach().cpu()
             exp = coef[:63] * template["std_exp"] + template["mean_exp"]
-            scale = coef[63:64] * (template["max_scale"] - template["min_scale"]) + template["min_scale"]
-            t = coef[64:67] * (template["max_t"] - template["min_t"]) + template["min_t"]
-            pitch = coef[67:68] * (template["max_pitch"] - template["min_pitch"]) + template["min_pitch"]
-            yaw = coef[68:69] * (template["max_yaw"] - template["min_yaw"]) + template["min_yaw"]
-            roll = coef[69:70] * (template["max_roll"] - template["min_roll"]) + template["min_roll"]
-            R = get_rotation_matrix(pitch, yaw, roll).reshape(1, 3, 3).numpy().astype(np.float32)
+            scale = coef[63:64] * (
+                template["max_scale"] - template["min_scale"]
+            ) + template["min_scale"]
+            translation = coef[64:67] * (
+                template["max_t"] - template["min_t"]
+            ) + template["min_t"]
+            pitch = coef[67:68] * (
+                template["max_pitch"] - template["min_pitch"]
+            ) + template["min_pitch"]
+            yaw = coef[68:69] * (
+                template["max_yaw"] - template["min_yaw"]
+            ) + template["min_yaw"]
+            roll = coef[69:70] * (
+                template["max_roll"] - template["min_roll"]
+            ) + template["min_roll"]
+            rotation = get_rotation_matrix(
+                pitch, yaw, roll
+            ).reshape(1, 3, 3).numpy().astype(np.float32)
             motion_list.append({
                 "exp": exp.reshape(1, 21, 3).numpy().astype(np.float32),
                 "scale": scale.reshape(1, 1).numpy().astype(np.float32),
-                "R": R,
-                "t": t.reshape(1, 3).numpy().astype(np.float32),
+                "R": rotation,
+                "t": translation.reshape(1, 3).numpy().astype(np.float32),
                 "pitch": pitch.reshape(1, 1).numpy().astype(np.float32),
                 "yaw": yaw.reshape(1, 1).numpy().astype(np.float32),
                 "roll": roll.reshape(1, 1).numpy().astype(np.float32),
