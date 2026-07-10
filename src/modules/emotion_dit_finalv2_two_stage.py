@@ -4,7 +4,7 @@ Method
 ------
 Stage 1 uses generic unlabeled talking videos and trains only the emotion-free
 base: audio feature mapping, motion/time backbone, original-audio
-cross-attention, autoregressive start states and motion decoder.  Emotion-bank
+cross-attention, autoregressive start states and motion decoder. Emotion-bank
 parameters and emotion cross-attention adapters are frozen and bypassed.
 
 Stage 2 freezes the complete Stage-1 audio base and learns:
@@ -15,12 +15,14 @@ Stage 2 freezes the complete Stage-1 audio base and learns:
 4. optionally the last shared FFN layers / motion head with a smaller LR.
 
 For each audio frame A_t, the emotion bank P_y is queried to obtain a
-content-aware emotion residual.  The resulting emotion audio is
+content-aware emotion residual:
 
     A_e = A + alpha * Gate(A, Attn(Q=A, K=P_y, V=P_y)).
 
-The original audio branch remains frozen in Stage 2, protecting lip-sync while
-the learned emotion branch contributes only residual emotional motion.
+The emotion-bank encoder uses normal initialization so it can immediately
+produce class-dependent memories. Only the final DiT emotion adapter is
+zero-initialized, which preserves the Stage-1 output at the beginning of Stage 2
+without blocking learning inside the emotion encoder.
 """
 
 from __future__ import annotations
@@ -105,8 +107,6 @@ class EmotionBankAudioEncoder(nn.Module):
             nn.LayerNorm(feature_dim),
             nn.Linear(feature_dim, feature_dim),
         )
-        nn.init.zeros_(self.output_projection[-1].weight)
-        nn.init.zeros_(self.output_projection[-1].bias)
         self.residual_scale = nn.Parameter(
             torch.tensor(float(residual_init))
         )
