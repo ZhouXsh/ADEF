@@ -2,8 +2,8 @@
 
 Method
 ------
-Stage 1 is emotion-agnostic.  It trains the generic audio-to-motion base on
-unlabeled talking videos and completely bypasses the emotion branch.  The
+Stage 1 is emotion-agnostic. It trains the generic audio-to-motion base on
+unlabeled talking videos and completely bypasses the emotion branch. The
 learned original-audio cross-attention is therefore optimized only for speech
 content, temporal alignment and lip synchronization.
 
@@ -23,10 +23,12 @@ The DiT retains two branches:
     trainable hierarchical emotion-audio branch -> emotional residual motion
 
 By default Stage 2 does not update the audio encoder, audio feature projection,
-original-audio attention, motion/time backbone or motion decoder.  Optional
+original-audio attention, motion/time backbone or motion decoder. Optional
 low-rate tuning of the last shared FFN layers and motion head is supported by
-the training script.  Both the emotion-audio output projection and per-layer
-emotion adapters start from zero, so Stage 2 initially reproduces Stage 1.
+the training script. The hierarchical encoder uses normal initialization so
+label/utterance/frame information is distinct from the first iteration, while
+the final per-layer emotion adapters are zero-initialized to preserve the
+Stage-1 output at the start of Stage 2.
 """
 
 from __future__ import annotations
@@ -114,8 +116,6 @@ class HierarchicalEmotionAudioEncoder(nn.Module):
             nn.LayerNorm(feature_dim),
             nn.Linear(feature_dim, feature_dim),
         )
-        nn.init.zeros_(self.output_projection[-1].weight)
-        nn.init.zeros_(self.output_projection[-1].bias)
         self.residual_scale = nn.Parameter(
             torch.tensor(float(residual_init))
         )
