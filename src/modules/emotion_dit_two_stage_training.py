@@ -50,6 +50,12 @@ class TwoStageTrainingMixin:
     def enforce_stage_mode(self) -> None:
         if not self._audio_encoder_trainable:
             self.audio_encoder.eval()
+        if self.train_stage == 2:
+            self.audio_feature_map.eval()
+            self.audio_norm.eval()
+            self.denoising_net.time_encoding.eval()
+            if isinstance(self.denoising_net.position, nn.Module):
+                self.denoising_net.position.eval()
         self.denoising_net.enforce_stage_mode(self.train_stage)
 
     def train(self, mode: bool = True):
