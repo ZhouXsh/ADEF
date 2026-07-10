@@ -19,8 +19,10 @@ The Stage-2 DiT therefore has two semantically distinct paths:
     original audio -> frozen audio branch -> lip-sync/content motion
     label-modulated audio -> emotion adapter -> emotional residual motion
 
-The emotion adapter output projection is zero-initialized, so Stage 2 starts
-exactly from the Stage-1 behavior instead of immediately disturbing lip-sync.
+Only the final emotion adapter output is zero-initialized.  The label-AdaLN
+encoder itself keeps a normal initialization so it can provide a distinct
+emotion memory immediately, while the model output still starts exactly from
+the Stage-1 behavior.
 """
 
 from __future__ import annotations
@@ -47,8 +49,6 @@ class LabelAdaLNAudioEncoder(nn.Module):
             nn.SiLU(),
             nn.Linear(feature_dim, 2 * feature_dim),
         )
-        nn.init.zeros_(self.modulation[-1].weight)
-        nn.init.zeros_(self.modulation[-1].bias)
         self.residual_scale = nn.Parameter(
             torch.tensor(float(residual_init))
         )
@@ -61,6 +61,7 @@ class LabelAdaLNAudioEncoder(nn.Module):
         emo_frame_feat: Optional[torch.Tensor] = None,
         drop_emotion: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        del emo_utt_feat, emo_frame_feat
         batch_size = audio_feat.shape[0]
         label = self.label_embedding(emo_index).unsqueeze(1)
         if drop_emotion is not None:
@@ -71,9 +72,13 @@ class LabelAdaLNAudioEncoder(nn.Module):
             )
         shift, scale = self.modulation(label).chunk(2, dim=-1)
         modulated = audio_feat * (1.0 + scale) + shift
-        return audio_feat + self.residual_scale.tanh() * (
-            modulated - audio_feat
-        )
+        residual = modulated - audio_feat
+        if drop_emotion is not None:
+            residual = residual * (~drop_emotion).to(
+                device=residual.device,
+                dtype=residual.dtype,
+            ).view(batch_size, 1, 1)
+        return audio_feat + self.residual_scale.tanh() * residual
 
 
 class DitTalkingHead(TwoStageDitTalkingHead):
