@@ -39,8 +39,8 @@ class DualEmotionAudioCrossDecoderLayer(nn.Module):
         feature_dim: int,
         n_heads: int,
         mlp_ratio: int = 4,
-        dropout: float = 0.0,
-        audio_scale: float = 1.0,
+        dropout: float = 0.1,
+        audio_scale: float = 0.5,
         emotion_audio_scale: float = 0.5,
     ):
         super().__init__()
@@ -119,13 +119,13 @@ class DualEmotionAudioDenoisingNetwork(nn.Module):
         n_heads: int = 8,
         n_layers: int = 8,
         mlp_ratio: int = 4,
-        align_mask_width: int = 3,
+        align_mask_width: int = 1,
         no_use_learnable_pe: bool = True,
         n_prev_motions: int = 10,
         n_motions: int = 100,
         n_diff_steps: int = 500,
-        decoder_dropout: float = 0.0,
-        audio_scale: float = 1.0,
+        decoder_dropout: float = 0.1,
+        audio_scale: float = 0.5,
         emotion_audio_scale: float = 0.5,
     ):
         super().__init__()
@@ -272,9 +272,9 @@ class DitTalkingHead(_BaseDitTalkingHead):
         n_layers: int = 8,
         n_heads: int = 8,
         mlp_ratio: int = 4,
-        align_mask_width: int = 3,
-        decoder_dropout: float = 0.0,
-        audio_scale: float = 1.0,
+        align_mask_width: int = 1,
+        decoder_dropout: float = 0.1,
+        audio_scale: float = 0.5,
         emotion_audio_scale: float = 0.5,
     ):
         super().__init__(
@@ -464,22 +464,6 @@ class DitTalkingHead(_BaseDitTalkingHead):
         )
         return eps, motion_feat_target, motion_feat.detach(), audio_feat_saved.detach()
 
-    @staticmethod
-    def _scale_at_step(max_scale: float, min_scale: float, t: int, num_steps: int, schedule: Optional[str]):
-        if schedule is None or schedule == "none" or num_steps <= 1:
-            return float(max_scale)
-        progress = (num_steps - float(t)) / float(num_steps - 1)
-        progress = max(0.0, min(1.0, progress))
-        if schedule == "linear":
-            w = progress
-        elif schedule == "cosine":
-            w = 0.5 - 0.5 * math.cos(math.pi * progress)
-        elif schedule == "bell":
-            w = math.sin(math.pi * progress)
-        else:
-            raise ValueError(f"Unknown cfg_schedule {schedule}")
-        return float(min_scale) + w * (float(max_scale) - float(min_scale))
-
     def _prepare_sample_entries(
         self,
         audio_feat: torch.Tensor,
@@ -569,8 +553,6 @@ class DitTalkingHead(_BaseDitTalkingHead):
         dynamic_threshold=None,
         ret_traj=False,
         emo_index=None,
-        cfg_min: Optional[Sequence[float]] = None,
-        cfg_schedule: Optional[str] = None,
         emo_utt_feat=None,
         emo_frame_feat=None,
         prev_emo_frame_feat=None,
@@ -581,16 +563,14 @@ class DitTalkingHead(_BaseDitTalkingHead):
         cfg_cond = [c for c in cfg_cond if c in ['audio', 'emotion']]
         if not isinstance(cfg_scale, (list, tuple)):
             cfg_scale = [cfg_scale] * len(cfg_cond)
-        if cfg_min is None:
-            cfg_min = [1.0 if c == 'audio' else 0.0 for c in cfg_cond]
         if len(cfg_cond) > 0:
-            cfg_cond, cfg_scale, cfg_min = zip(*sorted(
-                zip(cfg_cond, cfg_scale, cfg_min),
+            cfg_cond, cfg_scale = zip(*sorted(
+                zip(cfg_cond, cfg_scale),
                 key=lambda x: ['audio', 'emotion'].index(x[0]),
             ))
         else:
-            cfg_cond, cfg_scale, cfg_min = [], [], []
-        print(f"cfg_cond: {cfg_cond}, cfg_scale: {cfg_scale}, cfg_min: {cfg_min}, cfg_schedule: {cfg_schedule or 'none'}")
+            cfg_cond, cfg_scale = [], []
+        print(f"cfg_cond: {cfg_cond}, cfg_scale: {cfg_scale}")
 
         audio_feat_saved = self._get_audio_feature(audio_or_feat)
         prev_motion_feat, prev_audio_feat = self._init_prev_features(
@@ -650,14 +630,11 @@ class DitTalkingHead(_BaseDitTalkingHead):
                 uncond = chunks[0][:, -self.n_motions:]
                 audio_only = chunks[1][:, -self.n_motions:]
                 audio_emo = chunks[2][:, -self.n_motions:]
-                audio_scale = self._scale_at_step(cfg_scale[0], cfg_min[0], t, self.diffusion_sched.num_steps, cfg_schedule)
-                emo_scale = self._scale_at_step(cfg_scale[1], cfg_min[1], t, self.diffusion_sched.num_steps, cfg_schedule)
-                target_theta = uncond + audio_scale * (audio_only - uncond) + emo_scale * (audio_emo - audio_only)
+                target_theta = uncond + cfg_scale[0] * (audio_only - uncond) + cfg_scale[1] * (audio_emo - audio_only)
             elif n_entries == 2:
                 uncond = chunks[0][:, -self.n_motions:]
                 cond = chunks[1][:, -self.n_motions:]
-                scale = self._scale_at_step(cfg_scale[0], cfg_min[0], t, self.diffusion_sched.num_steps, cfg_schedule)
-                target_theta = uncond + scale * (cond - uncond)
+                target_theta = uncond + cfg_scale[0] * (cond - uncond)
             else:
                 target_theta = chunks[0][:, -self.n_motions:]
 
