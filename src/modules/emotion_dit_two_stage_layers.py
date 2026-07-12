@@ -16,7 +16,14 @@ from .common import PositionalEncoding, enc_dec_mask
 
 
 class TwoStageDualAudioDecoderLayer(nn.Module):
-    """Frozen-capable audio base plus isolated emotion residual branch."""
+    """Frozen-capable audio base with parallel dual-audio conditioning.
+
+    Both the original-audio branch and the emotion-audio branch query their
+    respective time-aligned memories from the same post-self-attention motion
+    representation. Their condition updates are fused before the shared FFN.
+    The emotion branch remains an isolated, zero-initialized residual adapter,
+    so Stage 2 starts from exactly the Stage-1 function.
+    """
 
     def __init__(
         self,
@@ -114,30 +121,29 @@ class TwoStageDualAudioDecoderLayer(nn.Module):
         alignment_mask: Optional[torch.Tensor] = None,
         emotion_present: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
+        # Motion self-attention first establishes the common query used by both
+        # time-aligned audio condition branches.
         self_update = self.self_attn(
             hidden, hidden, hidden, need_weights=False
         )[0]
         hidden = self.norm1(hidden + self.dropout1(self_update))
+        condition_query = hidden
 
+        # Content/original-audio branch.
         audio_update = self.audio_attn(
-            query=hidden,
+            query=condition_query,
             key=audio_memory,
             value=audio_memory,
             attn_mask=alignment_mask,
             need_weights=False,
         )[0]
-        hidden = self.norm2(
-            hidden + self.dropout2(self.audio_scale * audio_update)
-        )
+        condition_update = self.audio_scale * audio_update
 
-        ff = self.linear2(
-            self.ff_dropout(F.gelu(self.linear1(hidden)))
-        )
-        hidden = self.norm3(hidden + self.dropout3(ff))
-
+        # Emotion-audio branch. It uses the same post-self-attention motion
+        # representation as the content branch and is fused before the FFN.
         if emotion_audio_memory is not None:
             emotion_update = self.emotion_audio_attn(
-                query=self.emotion_query_norm(hidden),
+                query=self.emotion_query_norm(condition_query),
                 key=emotion_audio_memory,
                 value=emotion_audio_memory,
                 attn_mask=alignment_mask,
@@ -149,10 +155,19 @@ class TwoStageDualAudioDecoderLayer(nn.Module):
                     dtype=emotion_update.dtype,
                     device=emotion_update.device,
                 ).view(-1, 1, 1)
-            hidden = hidden + self.emotion_strength.tanh() * self.emotion_dropout(
-                emotion_update
+            condition_update = condition_update + (
+                self.emotion_strength.tanh()
+                * self.emotion_dropout(emotion_update)
             )
 
+        # Fuse both condition branches before the shared feed-forward block.
+        hidden = self.norm2(
+            hidden + self.dropout2(condition_update)
+        )
+        ff = self.linear2(
+            self.ff_dropout(F.gelu(self.linear1(hidden)))
+        )
+        hidden = self.norm3(hidden + self.dropout3(ff))
         return hidden
 
 
