@@ -1,4 +1,8 @@
-"""Clean dual-attention sanity model with emotion basis-token encoding.
+"""
+2026年7月2日16:14:48
+基于emotion_dit_clean，ChatGPT改的
+
+Clean dual-attention sanity model with emotion basis-token encoding.
 
 This file extends src/modules/emotion_dit_clean.py and changes only the emotion
 encoding, keeping the clean dual-attention denoising backbone untouched.

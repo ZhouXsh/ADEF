@@ -1,40 +1,6 @@
-"""Clean dual-attention sanity version for ADEF emotion DiT.
-
-Purpose
--------
-This file is a diagnostic model, not a new complicated method. It is designed to
-answer one question cleanly:
-
-    Can a DICE-Talk / IP-Adapter style decoupled audio-emotion cross-attention
-    run at least as stably as the original emotion_dit.py backbone?
-
-Compared with the original src/modules/emotion_dit.py, this version changes only
-what is necessary for that question:
-
-1. Keep the original DitTalkingHead interface and training return values.
-2. Keep the original diffusion schedule, audio encoder, start features, CFG
-   condition dropout style, and autoregressive prev_motion/prev_audio context.
-3. Keep the original denoising depth by default: n_layers=8.
-4. Do NOT use emotion to modulate audio features.
-5. Instead, every decoder layer has two separated condition attentions:
-      motion query -> local audio memory
-      motion query -> emotion memory
-   and the two updates are fused with fixed, explicit coefficients.
-6. No hidden sigmoid gate is used for the fusion coefficients. This avoids the
-   previous v4/v5/v6 issue where emotion was effectively scaled to almost zero.
-7. Transformer dropout is disabled by default in this sanity version. CFG
-   condition dropout is still kept. This isolates condition-dropout from layer
-   dropout while debugging.
-8. The audio alignment mask uses a small sliding window by default
-   (align_mask_width=3) instead of width=1, so the first current frames can
-   directly attend to the tail of prev_audio. Set align_mask_width=1 to reproduce
-   the original strict per-frame alignment mask, or <=0 for no mask.
-9. Sampling uses clean DICE-style three-branch CFG:
-      null -> audio-only -> audio+emotion
-   with previous audio context kept real for all branches.
-
-No explicit lip/non-lip keypoint split is used because ADEF uses implicit
-LivePortrait/JoyVASA-style motion features.
+"""
+2026年7月2日16:15:01
+基于emotion_dit_clean，与emotion_dit_clean_encoding同期，但是是自己改的最小变动版本。
 """
 
 from __future__ import annotations
@@ -65,7 +31,7 @@ class CleanDualCrossDecoderLayer(nn.Module):
         mlp_ratio: int = 4,
         dropout: float = 0.0,
         audio_scale: float = 1.0,
-        emotion_scale: float = 1.0,
+        emotion_scale: float = 0.5,
     ):
         super().__init__()
         self.audio_scale = float(audio_scale)
@@ -157,7 +123,7 @@ class CleanDualAttentionDenoisingNetwork(nn.Module):
         n_diff_steps: int = 500,
         decoder_dropout: float = 0.0,
         audio_scale: float = 1.0,
-        emotion_scale: float = 1.0,
+        emotion_scale: float = 0.5,
     ):
         super().__init__()
         self.motion_feat_dim = motion_feat_dim
@@ -305,7 +271,7 @@ class DitTalkingHead(_BaseDitTalkingHead):
         align_mask_width: int = 3,
         decoder_dropout: float = 0.0,
         audio_scale: float = 1.0,
-        emotion_scale: float = 1.0,
+        emotion_scale: float = 0.5,
     ):
         super().__init__(
             device=device,
@@ -339,6 +305,7 @@ class DitTalkingHead(_BaseDitTalkingHead):
             audio_scale=audio_scale,
             emotion_scale=emotion_scale,
         )
+        self.emo_embed = nn.Parameter(torch.randn(emo_classes, 8, feature_dim))
         self.to(device)
 
     def _get_audio_feature(self, audio_or_feat: torch.Tensor) -> torch.Tensor:
@@ -361,7 +328,7 @@ class DitTalkingHead(_BaseDitTalkingHead):
 
     def _encode_emotion(self, emo_index: torch.Tensor, drop_mask: Optional[torch.Tensor] = None):
         B = emo_index.shape[0]
-        emo_feat = self.emo_embed(emo_index).unsqueeze(1)
+        emo_feat = self.emo_embed[emo_index]   # (B,8,512)
         if drop_mask is not None:
             null_feat = self.null_emotion_feat.expand(B, 1, -1)
             emo_feat = torch.where(drop_mask.view(B, 1, 1), null_feat, emo_feat)
