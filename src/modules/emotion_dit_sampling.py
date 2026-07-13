@@ -142,7 +142,7 @@ class EmotionSamplingMixin:
                 indicator_in,
             )
 
-            if dynamic_threshold is not None:
+            if dynamic_threshold:
                 ratio, minimum, maximum = dynamic_threshold
                 current = results[:, -self.n_motions :]
                 quantile_input = current.reshape(batch_size * n_entries, -1).abs()
