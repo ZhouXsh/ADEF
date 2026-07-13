@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import torch
+
 from src.training.two_stage_data import build_loaders
 from src.training.two_stage_engine import (
     build_classifier,
@@ -38,12 +40,12 @@ def main(args):
 
     train_loader, val_loader = build_loaders(args)
     classifier = build_classifier(args, device)
-    optimizer = __import__("torch").optim.AdamW(
+    optimizer = torch.optim.AdamW(
         [p for p in model.parameters() if p.requires_grad],
         lr=args.lr,
         weight_decay=args.weight_decay,
     )
-    scheduler = __import__("torch").optim.lr_scheduler.LambdaLR(
+    scheduler = torch.optim.lr_scheduler.LambdaLR(
         optimizer, lr_lambda=lambda step: lr_multiplier(step, args)
     )
     start_iter = 0
