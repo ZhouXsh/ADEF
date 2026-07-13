@@ -1130,7 +1130,7 @@ if __name__ == "__main__":
     motion_feat_dim = 70     # ADEF_remake default
     n_motions = 100
     n_prev_motions = 25      # ADEF_remake default
-    feature_dim = 256        # ADEF_remake default
+    feature_dim = 512        # ADEF_remake default
 
     L_audio = int(16000 * n_motions / 25)
     N = 5

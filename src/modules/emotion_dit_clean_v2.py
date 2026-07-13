@@ -112,7 +112,7 @@ class CleanDualAttentionDenoisingNetwork(nn.Module):
         motion_feat_dim: int = 73,
         use_indicator=None,
         architecture: str = "decoder",
-        feature_dim: int = 256,
+        feature_dim: int = 512,
         n_heads: int = 8,
         n_layers: int = 8,
         mlp_ratio: int = 4,

@@ -33,7 +33,7 @@ class EmotionTransformer(nn.Module):
         motion_embed = self.PE(motion_embed)
 
         # 经过 Transformer Encoder
-        encoded_features = self.encoder(motion_embed)  # (B, L, D=128)
+        encoded_features = self.encoder(motion_embed)  # (B, L, D=512)
 
         # 平均池化操作
         encoded_features = encoded_features.mean(dim=1)  # (B, L, D) -> (B, D)

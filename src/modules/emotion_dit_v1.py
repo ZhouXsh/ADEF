@@ -99,7 +99,7 @@ class DenoisingNetworkDICE(nn.Module):
     """Motion denoiser with separate audio/emotion condition memories."""
 
     def __init__(self, device='cuda', motion_feat_dim=73,
-                 use_indicator=None, architecture="decoder", feature_dim=256,
+                 use_indicator=None, architecture="decoder", feature_dim=512,
                  n_heads=8, n_layers=8, mlp_ratio=4, align_mask_width=1,
                  no_use_learnable_pe=True, n_prev_motions=10, n_motions=100,
                  n_diff_steps=500, emotion_scale=0.35):

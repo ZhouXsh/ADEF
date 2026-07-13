@@ -167,7 +167,9 @@ cython_debug/
 /dataset/
 经验教训/
 *.mp4
+/src_dice_migration/
 /assets/
+/eval/
 
 src/my_prepare/*.pkl
 # src/my_prepare/*.txt

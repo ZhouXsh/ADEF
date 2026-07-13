@@ -94,8 +94,8 @@ class DitTalkingHead(nn.Module):
             raise ValueError(f'Unknown audio model {self.audio_model}!')
         # 音频编码器的输出通常是一个形状为 [batch_size, seq_len, 768] 的张量，其中 768 是编码器输出的特征维度。   seq_len这里为帧数
         if architecture == 'decoder':
-            self.audio_feature_map = nn.Linear(768, feature_dim)              # 768 -> 256
-            self.start_audio_feat = nn.Parameter(torch.randn(emo_classes, self.n_prev_motions, feature_dim))        # shape：（1, 25, feature_dim=256） 初始随机的音频特征向量
+            self.audio_feature_map = nn.Linear(768, feature_dim)              # 768 -> 512
+            self.start_audio_feat = nn.Parameter(torch.randn(emo_classes, self.n_prev_motions, feature_dim))        # shape：（1, 25, feature_dim=512） 初始随机的音频特征向量
         else:
             raise ValueError(f'Unknown architecture {architecture}!')
 
@@ -113,9 +113,9 @@ class DitTalkingHead(nn.Module):
         guiding_conditions = guiding_conditions.split(',') if guiding_conditions else []        # ['audio', 'emotion', '']
         self.guiding_conditions = [cond for cond in guiding_conditions if cond in ['audio', 'emotion']]    # ['audio', 'emotion']
         if 'audio' in self.guiding_conditions:   # True
-            audio_feat_dim = feature_dim         # 256
-            # self.null_audio_feat 就会作为一个学习的参数，其形状为 [1, 1, feature_dim=256]。这是一个占位符，用来在条件音频的引导下生成对应的运动特征。
-            self.null_audio_feat = nn.Parameter(torch.randn(1, 1, audio_feat_dim)) # 1, 1, 256
+            audio_feat_dim = feature_dim         # 512
+            # self.null_audio_feat 就会作为一个学习的参数，其形状为 [1, 1, feature_dim=512]。这是一个占位符，用来在条件音频的引导下生成对应的运动特征。
+            self.null_audio_feat = nn.Parameter(torch.randn(1, 1, audio_feat_dim)) # 1, 1, 512
             self.audio_norm = nn.LayerNorm(audio_feat_dim, eps=1e-9)
         if 'emotion' in self.guiding_conditions:   # True
             emotion_feat_dim = feature_dim         # 512
@@ -129,7 +129,7 @@ class DitTalkingHead(nn.Module):
     def device(self):  # 返回设备信息（不必理会）
         return next(self.parameters()).device
 
-    # 提取音频特征  (N, L_audio) -> (N, L_audio = audio_unit * n_units + pad_threshold) -> (N, 2L=200, 768) -> (N, 768, L) ->  (N, L=100, feature_dim=256)
+    # 提取音频特征  (N, L_audio) -> (N, L_audio = audio_unit * n_units + pad_threshold) -> (N, 2L=200, 768) -> (N, 768, L) ->  (N, L=100, feature_dim=512)
     def extract_audio_feature(self, audio, frame_num=None):      # audio: (N, L_audio)  L_audio是通过采样率计算的音频长度
         frame_num = frame_num or self.n_motions         # 当前序列内的帧数  L = 100
 
@@ -143,8 +143,8 @@ class DitTalkingHead(nn.Module):
         hidden_states = F.interpolate(hidden_states, size=frame_num, align_corners=False, mode='linear')  # (N, 768, L)   线性插值（重采样）
         hidden_states = hidden_states.transpose(1, 2)  # (N, L=100, 768)
 
-        audio_feat = self.audio_feature_map(hidden_states)     # (N, L, 768)  ->  (N, L=100, feature_dim=256)   特征维度映射
-        return audio_feat        # (N=8, L=100, feature_dim=256)        L：帧数   feature_dim：最终的音频特征维度
+        audio_feat = self.audio_feature_map(hidden_states)     # (N, L, 768)  ->  (N, L=100, feature_dim=512)   特征维度映射
+        return audio_feat        # (N=8, L=100, feature_dim=512)        L：帧数   feature_dim：最终的音频特征维度
 
     def _cfg_make_scale(self, cfg_cond, cfg_scale):  # 优化CFG，2026年6月25日
         if not isinstance(cfg_scale, list):  # 优化CFG，2026年6月25日
@@ -355,7 +355,7 @@ class DitTalkingHead(nn.Module):
 # 去噪网络 DiT
 class DenoisingNetwork(nn.Module):
     def __init__(self, device='cuda', motion_feat_dim=73, 
-                 use_indicator=None, architecture="decoder", feature_dim=256, n_heads=8, 
+                 use_indicator=None, architecture="decoder", feature_dim=512, n_heads=8, 
                  n_layers=8, mlp_ratio=4, align_mask_width=1, no_use_learnable_pe=True, n_prev_motions=10,
                  n_motions=100, n_diff_steps=500, ):
         super().__init__()
@@ -365,7 +365,7 @@ class DenoisingNetwork(nn.Module):
 
         # Transformer
         self.architecture = architecture          # "decoder"
-        self.feature_dim = feature_dim            # 256
+        self.feature_dim = feature_dim            # 512
         self.n_heads = n_heads                    # 多头注意力的头数   8
         self.n_layers = n_layers                  # Transformer块的层数  8。
         self.mlp_ratio = mlp_ratio                # MLP部分的扩展比率。用于计算feedforward层的维度，默认为 4。
@@ -377,27 +377,27 @@ class DenoisingNetwork(nn.Module):
         self.n_motions = n_motions             # 当前运动特征数（帧
 
         # Temporal embedding for the diffusion time step   扩散时间步长的时间嵌入
-        self.TE = PositionalEncoding(self.feature_dim, max_len=n_diff_steps + 1)  # 时间嵌入   256 , 501
+        self.TE = PositionalEncoding(self.feature_dim, max_len=n_diff_steps + 1)  # 时间嵌入   512 , 501
         self.diff_step_map = nn.Sequential(
-            nn.Linear(self.feature_dim, self.feature_dim),   # 256 -> 256
+            nn.Linear(self.feature_dim, self.feature_dim),   # 512 -> 512
             nn.GELU(),
-            nn.Linear(self.feature_dim, self.feature_dim)    # 256 -> 256
+            nn.Linear(self.feature_dim, self.feature_dim)    # 512 -> 512
         )
 
         if self.use_learnable_pe:
             # Learnable positional encoding  可学习的位置编码
-            self.PE = nn.Parameter(torch.randn(1, 1 + self.n_prev_motions + self.n_motions, self.feature_dim))   # (1, 1 + L_p + L, feature_dim=256)
+            self.PE = nn.Parameter(torch.randn(1, 1 + self.n_prev_motions + self.n_motions, self.feature_dim))   # (1, 1 + L_p + L, feature_dim=512)
         else:       # this
-            self.PE = PositionalEncoding(self.feature_dim)   #  256         # self.PE.pe : (1, 600, 256)
+            self.PE = PositionalEncoding(self.feature_dim)   #  512         # self.PE.pe : (1, 600, 512)
 
         # Transformer decoder
         if self.architecture == 'decoder':
-            self.feature_proj = nn.Linear(self.motion_feat_dim + (1 if self.use_indicator else 0),   # （73or74) or (70or71) -> 256
+            self.feature_proj = nn.Linear(self.motion_feat_dim + (1 if self.use_indicator else 0),   # （73or74) or (70or71) -> 512
                                           self.feature_dim)
             decoder_layer = nn.TransformerDecoderLayer(
-                d_model=self.feature_dim,         # 输入和输出的特征维度  256
+                d_model=self.feature_dim,         # 输入和输出的特征维度  512
                 nhead=self.n_heads,               # 注意力头数   8
-                dim_feedforward=self.mlp_ratio * self.feature_dim,  # 前馈层的维度   4 * 256               
+                dim_feedforward=self.mlp_ratio * self.feature_dim,  # 前馈层的维度   4 * 512               
                 activation='gelu', batch_first=True
             )
             self.transformer = nn.TransformerDecoder(decoder_layer, num_layers=self.n_layers)   # num_layers=8个块（层）
@@ -414,9 +414,9 @@ class DenoisingNetwork(nn.Module):
 
         # Motion decoder  运动解码器
         self.motion_dec = nn.Sequential(
-            nn.Linear(self.feature_dim, self.feature_dim // 2),     # 256 -> 128
+            nn.Linear(self.feature_dim, self.feature_dim // 2),     # 512 -> 256
             nn.GELU(),
-            nn.Linear(self.feature_dim // 2, self.motion_feat_dim),  # 128 -> 70
+            nn.Linear(self.feature_dim // 2, self.motion_feat_dim),  # 256 -> 70
             # nn.Tanh() # 增加了一个tanh
             # nn.Softmax()
         )
@@ -431,21 +431,21 @@ class DenoisingNetwork(nn.Module):
         """
         Args:
             motion_feat: (N, L, d_motion). Noisy motion feature    forward(N=8, L=100, d_motion=70) 加噪后的最终噪声         sample: (2, 100, 73)  当前step的噪声（用于预测前一step的）
-            audio_feat: (N, L, feature_dim)   forward：“屏蔽”后的音频特征(N=8, L=100, feature_dim=256)     sample时：随机+真实(2, L=100, feature_dim=256)
+            audio_feat: (N, L, feature_dim)   forward：“屏蔽”后的音频特征(N=8, L=100, feature_dim=512)     sample时：随机+真实(2, L=100, feature_dim=512)
             prev_motion_feat: (N, L_p, d_motion). Padded previous motion coefficients or feature  填充的先前运动特征 forward(8, n_prev_motions=25, motion_feat_dim=70)   sample(N, n_prev_motions=10, motion_feat_dim=73)
-            prev_audio_feat: (N, L_p, d_audio). Padded previous motion coefficients or feature    填充的先前音频特征 forward(8, n_prev_motions=25, feature_dim=256)      sample(N, n_prev_motions=10, motion_feat_dim=256)
+            prev_audio_feat: (N, L_p, d_audio). Padded previous motion coefficients or feature    填充的先前音频特征 forward(8, n_prev_motions=25, feature_dim=512)      sample(N, n_prev_motions=10, motion_feat_dim=512)
             step: (N,)                                         时间步，1~500的随机值  forward(8,)       sample(2,)
             indicator: (N, L). 0/1 indicator for the real (unpadded) motion feature  # (N, L) None      forward(8,100)       sample(2,100)
         Returns:
             motion_feat_target: (N, L_p + L, d_motion)    forward(8, 125, 70)   sample(2, 110, 73)
         """
         # Diffusion time step embedding  扩散时间步长嵌入  
-        # TE.pe                shape: [1, n_diff_steps + 1=501, d_model=256]
-        # TE.pe[0, step]       shape: [d_model=256]        维度1的位置0，维度2的位置step  批次0的第step步
-        # self.TE.pe[0, step]                               (N=8, diff_step_dim=256)   
-        # self.diff_step_map(self.TE.pe[0, step])           (N=8, diff_step_dim=256)   
+        # TE.pe                shape: [1, n_diff_steps + 1=501, d_model=512]
+        # TE.pe[0, step]       shape: [d_model=512]        维度1的位置0，维度2的位置step  批次0的第step步
+        # self.TE.pe[0, step]                               (N=8, diff_step_dim=512)   
+        # self.diff_step_map(self.TE.pe[0, step])           (N=8, diff_step_dim=512)   
 
-        diff_step_embedding = self.diff_step_map(self.TE.pe[0, step]).unsqueeze(1)    # 时间步嵌入 forward(N=8 or 2, 1, diff_step_dim=256)    (N=2, 1, diff_step_dim=256)
+        diff_step_embedding = self.diff_step_map(self.TE.pe[0, step]).unsqueeze(1)    # 时间步嵌入 forward(N=8 or 2, 1, diff_step_dim=512)    (N=2, 1, diff_step_dim=512)
 
         # 指示器用于指示 最后一个音频片段 中 填充的部分。
         if indicator is not None:   # 包含指示器
@@ -462,27 +462,27 @@ class DenoisingNetwork(nn.Module):
         if self.use_indicator:   # 拼接指示器   
             feats_in = torch.cat([feats_in, indicator], dim=-1)  # (N, L_p + L, d_motion)+(N, L_p + L, 1) = (N, L_p + L, d_motion + 1 )
 
-        feats_in = self.feature_proj(feats_in)  # (N, L_p + L=125 or 110, 70 or 73) -> (N, L_p + L=125 or 110, feature_dim=256)
+        feats_in = self.feature_proj(feats_in)  # (N, L_p + L=125 or 110, 70 or 73) -> (N, L_p + L=125 or 110, feature_dim=512)
         # feats_in = torch.cat([person_feat, feats_in], dim=1)  # (N, 1 + L_p + L, feature_dim)
 
         if self.use_learnable_pe:      # 可学习的位置嵌入
             # feats_in = feats_in + self.PE
-            # self.PE : (1, 1 + L_p + L, feature_dim=256)
-            feats_in = feats_in + self.PE + diff_step_embedding # (N, L_p + L, feature_dim=256) + (1, 1 + L_p + L, feature_dim=256) + (N=2, 1, diff_step_dim=256)
+            # self.PE : (1, 1 + L_p + L, feature_dim=512)
+            feats_in = feats_in + self.PE + diff_step_embedding # (N, L_p + L, feature_dim=512) + (1, 1 + L_p + L, feature_dim=512) + (N=2, 1, diff_step_dim=512)
         else:
-            # feats_in = self.PE(feats_in)         forward(8 125 256)+(8 1 256) = (8 125 256)
-            feats_in = self.PE(feats_in) + diff_step_embedding  # (N, L_p + L, feature_dim=256) + (N, 1, diff_step_dim=256) = (N, L_p + L, feature_dim=256)
+            # feats_in = self.PE(feats_in)         forward(8 125 512)+(8 1 512) = (8 125 512)
+            feats_in = self.PE(feats_in) + diff_step_embedding  # (N, L_p + L, feature_dim=512) + (N, 1, diff_step_dim=512) = (N, L_p + L, feature_dim=512)
 
         # Transformer
-        if self.architecture == 'decoder':   # forard(N, n_prev_motions=25, feature_dim=256) cat (N=8, L=100, feature_dim=256) = (8 125 256)
-            audio_feat_in = torch.cat([prev_audio_feat, audio_feat], dim=1)        # (N, L_p + L, d_audio= feature_dim=256)
-            feat_out = self.transformer(feats_in, audio_feat_in, memory_mask=self.alignment_mask)     # (N, L_p + L, d_audio= feature_dim=256)
+        if self.architecture == 'decoder':   # forard(N, n_prev_motions=25, feature_dim=512) cat (N=8, L=100, feature_dim=512) = (8 125 512)
+            audio_feat_in = torch.cat([prev_audio_feat, audio_feat], dim=1)        # (N, L_p + L, d_audio= feature_dim=512)
+            feat_out = self.transformer(feats_in, audio_feat_in, memory_mask=self.alignment_mask)     # (N, L_p + L, d_audio= feature_dim=512)
         else:
             raise ValueError(f'Unknown architecture: {self.architecture}')
 
         # Decode predicted motion feature noise / sample
         # motion_feat_target = self.motion_dec(feat_out[:, 1:])  # (N, L_p + L, d_motion)
-        motion_feat_target = self.motion_dec(feat_out)          # (N, L_p + L=110, 512 -> 256 -> 73 or 70)
+        motion_feat_target = self.motion_dec(feat_out)          # (N, L_p + L=110, 512 -> 512 -> 73 or 70)
 
         return motion_feat_target
 
