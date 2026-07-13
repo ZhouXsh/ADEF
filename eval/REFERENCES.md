@@ -1,58 +1,19 @@
-# 评估指标参考与实现说明
-
-本文档整理 `eval/` 中使用的指标类型，以及常见的外部实现和资源。
-
-## 唇音同步
-
-- Wav2Lip / SyncNet：LSE-D 和 LSE-C 是说话人脸领域常用的音视频同步指标。官方仓库：`https://github.com/Rudrabha/Wav2Lip`。
-- 推荐本地封装：`eval/sync_lse/`。
-- 轻量级替代指标：`eval/mouth_audio_corr/`。
-
-## 几何误差
-
-- LMD / Landmark Distance：说话人脸领域常用的关键点几何误差指标，适合在有逐帧对齐参考视频时评估面部运动和口型误差。
-- 推荐重点关注 `mouth_lmd`，它直接反映嘴部几何轨迹与参考视频之间的偏差。
-- 本地封装：`eval/lmd/`。
-
-## 身份保持
-
-- ArcFace / InsightFace 风格的人脸 embedding 常用于衡量生成视频的身份保持能力。
-- ADEF 的 `requirements.txt` 中已经包含 `insightface`。
-- 本地封装：`eval/identity_arcface/`。
-
-## 分布级图像 / 视频质量
-
-- FID：帧级图像分布指标。封装目录：`eval/fid_frame/`。
-- FVD：视频分布指标，通常使用 I3D 特征。封装目录：`eval/fvd/`。
-- 注意：二者都需要足够样本量，并且必须保持一致的预处理流程。
-
-## 动作自然度与表情表现
-
-- 关键点动态、嘴部运动、眉眼运动和头部运动可作为说话人脸生成的诊断性指标。
-- 本地封装：`eval/landmark_dynamics/`、`eval/head_pose/`。
-
-## 感知时间一致性
-
-- 相邻帧 LPIPS 可作为感知闪烁的代理指标。
-- 本地封装：`eval/temporal_lpips/`。
-
-## 情感一致性
-
-- 情感识别应在所有方法中使用同一个固定分类器。
-- 本地封装：`eval/emotion_consistency/`，支持 HuggingFace 图像分类模型或自定义外部命令。
-
-## 推荐汇报表
-
-| 维度 | 指标 | 脚本 | 方向 |
-|---|---|---|---|
-| 唇音同步 | LSE-D | `sync_lse` | 越低越好 |
-| 唇音同步 | LSE-C | `sync_lse` | 越高越好 |
-| 唇音同步代理 | mouth-audio corr | `mouth_audio_corr` | 越高越好 |
-| 几何误差 | full LMD | `lmd` | 越低越好 |
-| 嘴部几何误差 | mouth LMD | `lmd` | 越低越好 |
-| 身份保持 | ArcFace cosine | `identity_arcface` | 越高越好 |
-| 图像质量 | FID | `fid_frame` | 越低越好 |
-| 视频质量 | FVD | `fvd` | 越低越好 |
-| 自然度 | mouth/head/eyebrow jitter | `landmark_dynamics`, `head_pose` | 与真实分布对齐 |
-| 感知闪烁 | temporal LPIPS | `temporal_lpips` | 通常越低越稳定，但需避免过度静止 |
-| 情感 | target confidence/top1 | `emotion_consistency` | 越高越好 |
+| 评估维度    | 指标                                | 趋势 | 含义与使用建议                                           | 官方或权威实现                                                                                                                                 |
+| ------- | --------------------------------- | -: | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| 像素重建质量  | **PSNR**                          |  ↑ | 衡量生成帧与真值帧的像素误差，需要逐帧对齐的 GT                         | [EAT 官方评估代码](https://github.com/yuangan/evaluation_eat)；[scikit-image](https://github.com/scikit-image/scikit-image)                    |
+| 结构重建质量  | **SSIM**                          |  ↑ | 比 PSNR 更关注亮度、对比度和局部结构，同样需要配对 GT                   | [EAT 官方评估代码](https://github.com/yuangan/evaluation_eat)；[scikit-image](https://github.com/scikit-image/scikit-image)                    |
+| 感知相似度   | **LPIPS**                         |  ↓ | 使用深层视觉特征衡量感知差异，通常比 PSNR/SSIM 更符合人眼感受              | [LPIPS 作者官方代码](https://github.com/richzhang/PerceptualSimilarity)                                                                       |
+| 图像分布质量  | **FID**                           |  ↓ | 比较真实帧与生成帧的 Inception 特征分布；不要求逐帧对应，但要求足够多且预处理一致的样本 | [FID 原作者 TTUR](https://github.com/bioinf-jku/TTUR)；[常用 PyTorch 版本](https://github.com/mseitzer/pytorch-fid)                             |
+| 无参考图像质量 | **NIQE**                          |  ↓ | 不需要真值，可评估清晰度、噪声和自然图像统计偏差；对人脸语义错误不敏感               | [MathWorks NIQE 官方实现](https://www.mathworks.com/help/images/ref/niqe.html)；[PyIQA PyTorch 实现](https://github.com/chaofengc/IQA-PyTorch) |
+| 口型同步    | **LSE-C**                         |  ↑ | SyncNet 音视频同步置信度，是说话人脸论文最常见指标之一                   | [Wav2Lip 官方 Evaluation](https://github.com/Rudrabha/Wav2Lip/tree/master/evaluation)                                                     |
+| 口型同步    | **LSE-D**                         |  ↓ | SyncNet 音频与口型嵌入之间的距离                              | [Wav2Lip 官方 Evaluation](https://github.com/Rudrabha/Wav2Lip/tree/master/evaluation)                                                     |
+| 音视频同步   | **SyncNet Confidence / SyncConf** |  ↑ | EAT 等工作直接报告的同步置信度，与 LSE-C 基本属于同类评价                | [SyncNet 原作者代码](https://github.com/joonson/syncnet_python)；[EAT Evaluation](https://github.com/yuangan/evaluation_eat)                  |
+| 嘴部几何误差  | **M-LMD**                         |  ↓ | 生成帧与 GT 的嘴部关键点平均距离，直接评价口型位置和幅度                    | [EAT 官方评估代码](https://github.com/yuangan/evaluation_eat)；[face-alignment](https://github.com/1adrianb/face-alignment)                    |
+| 全脸几何误差  | **F-LMD / LMD**                   |  ↓ | 全脸关键点距离，综合反映表情、姿态和几何运动准确性                         | [EAT 官方评估代码](https://github.com/yuangan/evaluation_eat)；[face-alignment](https://github.com/1adrianb/face-alignment)                    |
+| 身份保持    | **CSIM / ID-SIM**                 |  ↑ | 使用 ArcFace 等人脸识别网络计算参考图与生成帧的身份特征余弦相似度             | [InsightFace / ArcFace 官方代码](https://github.com/deepinsight/insightface)                                                                |
+| 情感分类准确率 | **Accemo / EmAcc**                |  ↑ | 用预训练或重新训练的表情识别器判断生成视频是否表达目标情感                     | [EAT 官方评估代码](https://github.com/yuangan/evaluation_eat)；[Emotion-FAN 官方代码](https://github.com/Open-Debin/Emotion-FAN)                   |
+| 连续情感一致性 | **V/A MAE、RMSE**                  |  ↓ | 比较目标与生成视频的 Valence、Arousal，适用于连续情感强度控制            | [EmoNet 官方代码](https://github.com/face-analysis/emonet)                                                                                  |
+| 连续情感相关性 | **V/A PCC、CCC、SAGR**              |  ↑ | 衡量生成情感变化趋势是否与目标一致，适合情感插值和强度控制                     | [EmoNet 官方代码](https://github.com/face-analysis/emonet)                                                                                  |
+| 时序分布质量  | **FVD**                           |  ↓ | 在视频特征空间比较真实和生成视频分布，兼顾外观及时间动态                      | [Google Research FVD 官方代码](https://github.com/google-research/google-research/tree/master/frechet_video_distance)                       |
+| 姿态准确性   | **APD**                           |  ↓ | 比较生成帧与 GT 的头部姿态或 3DMM pose 系数                     | [pose-evaluation](https://github.com/AliaksandrSiarohin/pose-evaluation)                                                                |
+| 表情参数准确性 | **AED**                           |  ↓ | 比较生成帧和目标帧的 3DMM expression 系数                     | [Deep3DFaceRecon](https://github.com/microsoft/Deep3DFaceReconstruction)                                                                |
