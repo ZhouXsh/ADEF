@@ -294,8 +294,8 @@ def main(args, option_text=None):
         torch.load(args.classifier_path, map_location=device), strict=False
     )
     classifier.eval()
-    for parameter in classifier.parameters():
-        parameter.requires_grad_(False)
+    # for parameter in classifier.parameters():
+    #     parameter.requires_grad_(False)
 
     exp_dir = Path('experiments/emo_dit') / args.exp_name
     log_dir = exp_dir / 'logs'
@@ -338,8 +338,8 @@ def main(args, option_text=None):
 
 def make_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--exp_name', default='vasa_prev25_current100')
-    parser.add_argument('--device_id', type=int, default=0)
+    parser.add_argument('--exp_name', default='20260714_vasa_prev25_current100')
+    parser.add_argument('--device_id', type=int, default=1)
     parser.add_argument('--data_root', type=Path, default='src/my_prepare/')
     parser.add_argument('--motion_filename', default='front_all_motions.pkl')
     parser.add_argument('--motion_template_filename', default='motion_template.pkl')

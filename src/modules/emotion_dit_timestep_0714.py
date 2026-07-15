@@ -1,6 +1,4 @@
-# 2026年7月13日 emotion_dit_myfinalv1.py的基础上，修改错误内容，包括：
-# self.denoising_net = DenoisingNetwork() 新增 n_diff_steps=n_diff_steps。prev_audio_feat、pa_raw还是得归一化。
-import torch   
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import platform
@@ -58,18 +56,15 @@ class DiffusionSchedule(nn.Module):
         return sigmas
 
 class DitTalkingHead(nn.Module):
-    def __init__(self, device='cuda', target="sample", architecture="decoder",
-                 motion_feat_dim=70, fps=25, n_motions=100, n_prev_motions=10,
-                 audio_model="hubert", feature_dim=512, n_diff_steps=500,
-                 diff_schedule="cosine", cfg_mode="incremental", guiding_conditions="audio,emotion", emo_classes = 8,
-                 # dual-branch attention params（最小新增）
-                 n_layers=8, n_heads=8, mlp_ratio=4, align_mask_width=1,
-                 audio_scale=0.5, emotion_audio_scale=0.5):
+    def __init__(self, device='cuda', target="sample", architecture="decoder",  
+                 motion_feat_dim=70, fps=25, n_motions=100, n_prev_motions=10,                               
+                 audio_model="hubert", feature_dim=512, n_diff_steps=500,                                             
+                 diff_schedule="cosine", cfg_mode="incremental", guiding_conditions="audio,emotion", emo_classes = 8):
         super().__init__()
         # Model parameters
         self.target = target # 预测原始图像还是预测噪声
         self.architecture = architecture
-        self.motion_feat_dim = motion_feat_dim   # motion 特征维度
+        self.motion_feat_dim = motion_feat_dim   # motion 特征维度 
         self.fps = fps
         self.n_motions = n_motions # 当前motion100个, window_length, T_w   窗口长度
         self.n_prev_motions = n_prev_motions # 前续motion
@@ -106,12 +101,9 @@ class DitTalkingHead(nn.Module):
 
         self.start_motion_feat = nn.Parameter(torch.randn(emo_classes, self.n_prev_motions, self.motion_feat_dim))  # shape：（1,  25, motion_feat_dim=70） 初始随机的运动特征向量
 
-        # Diffusion model       扩散模型（双分支注意力版本：原版 DenoisingNetwork 内部已替换）
-        self.denoising_net = DenoisingNetwork(device=device, n_motions=self.n_motions, n_prev_motions=self.n_prev_motions,
-                                              motion_feat_dim=self.motion_feat_dim, feature_dim=feature_dim,
-                                              n_layers=n_layers, n_heads=n_heads, mlp_ratio=mlp_ratio,
-                                              align_mask_width=align_mask_width, n_diff_steps=n_diff_steps,
-                                              audio_scale=audio_scale, emotion_audio_scale=emotion_audio_scale)
+        # Diffusion model       扩散模型
+        self.denoising_net = DenoisingNetwork(device=device, n_motions=self.n_motions, n_prev_motions=self.n_prev_motions, n_diff_steps=n_diff_steps,
+                                              motion_feat_dim=self.motion_feat_dim, feature_dim=feature_dim)
         # diffusion schedule    扩散调度器
         # 这个模块定义了扩散过程中的噪声调度，它决定了噪声在不同扩散步骤中的变化方式。例如，使用余弦调度时，噪声会逐渐减小。
         self.diffusion_sched = DiffusionSchedule(n_diff_steps, diff_schedule)  # 50  cosine
@@ -168,7 +160,7 @@ class DitTalkingHead(nn.Module):
 
         # 如果没有先前的运动or音频特征，则初始化一个随机值的相同shape的张量
         if prev_motion_feat is None:  # 前续motion特征 (N, n_prev_motions=10, motion_feat_dim=70)
-            prev_motion_feat = torch.index_select(self.start_motion_feat, 0, emo_index)  # （1, n_prev_motions=10 or 25, motion_feat_dim=70 or 70） -> (N=8, n_prev_motions=10 or 25, motion_feat_dim=70)
+            prev_motion_feat = torch.index_select(self.start_motion_feat, 0, emo_index)  # （1, n_prev_motions=10 or 25, motion_feat_dim=70） -> (N=8, n_prev_motions=10 or 25, motion_feat_dim=70)
         pre_None = False
         if prev_audio_feat is None:  # 前续语音特征 (N, n_prev_motions=10, feature_dim=512)
             prev_audio_feat = torch.index_select(self.start_audio_feat, 0, emo_index)  # （1, n_prev_motions=10, feature_dim=512） -> (N=8, n_prev_motions=10 or 25, feature_dim=512)  
@@ -177,12 +169,15 @@ class DitTalkingHead(nn.Module):
         p_AE = 0.1     # 0.1概率丢弃二者
         p_E = 0.55      # 0.55的概率丢弃情感
 
-        # === 双分支: 预计算 emotion 调制参数 (用于 emotion-audio 分支) ===
-        emo_shift, emo_scale = None, None
         if 'emotion' in self.guiding_conditions:
-            emo_feat_full = self.emo_embed(emo_index)        # (N, 512)
-            emo_feat_full = emo_feat_full.unsqueeze(1)        # (N, 1, 512)
-            emo_shift_full, emo_scale_full = self.adaLN_modulation(emo_feat_full).chunk(2, dim=2)  # (N, 1, 512), (N, 1, 512)
+            # 情感特征的one-hot编码，假设情感类别数为8
+            emo_feat = self.emo_embed(emo_index)  # (N, ) -> (N, 512)
+            emo_feat = emo_feat.unsqueeze(1)          # (N, 512) -> (N, 1, 512)
+            emo_shift, emo_scale = self.adaLN_modulation(emo_feat).chunk(2, dim=2)  # (N, 1, 512),  (N, 1, 512)
+            if pre_None:
+                prev_audio_feat = self.audio_norm(prev_audio_feat)
+            else:    
+                prev_audio_feat = self.audio_norm(prev_audio_feat) * (1 + emo_scale) + emo_shift
 
         # Classifier-free guidance 无分类器引导
         # 根据条件和阈值，对音频特征进行“屏蔽”或“替换”
@@ -206,32 +201,15 @@ class DitTalkingHead(nn.Module):
                     audio_feat = torch.where(mask_audio.view(-1, 1, 1),
                                              self.null_audio_feat.expand(batch_size, self.n_motions, -1),  # (1, 1, feature_dim=512) -> (N, L, feature_dim=512)
                                              audio_feat)
-            #####  emo CFG: 仅对 emotion-audio 分支生效 (双分支关键)
-            if 'emotion' in self.guiding_conditions:
+            #####  新增 emo CFG
+            if len(self.guiding_conditions) == 2 and 'emotion' in self.guiding_conditions:
                 # 生成随机丢弃掩码
-                mask_emotion = mask_flag < p_E      # 以 p_e 的概率仅丢弃情感   0.55
+                mask_emotion = mask_flag < p_E      # 以 p_e 的概率仅丢弃情感   0.2
                 emo_feat = torch.where(mask_emotion.view(-1, 1, 1),       #  (b,1,1)
                                         self.null_emotion_feat.expand(batch_size, -1, -1),      # (1, 1, 512) -> (N, 1, 512)
-                                        emo_feat_full)                # emo_feat: (N, 1, 512)
+                                        emo_feat)                # emo_feat: (N, 1, 512)
                 emo_shift, emo_scale = self.adaLN_modulation(emo_feat).chunk(2, dim=2)  # (N, 1, 512),  (N, 1, 512)
-
-        # === 双分支构造: 原始 audio 分支 (无 emotion 调制) ===
-        audio_branch = self.audio_norm(audio_feat)
-        if pre_None:
-            prev_audio_branch = self.audio_norm(prev_audio_feat)
-        else:
-            prev_audio_branch = self.audio_norm(prev_audio_feat)
-
-        # === 双分支构造: emotion-modulated audio 分支 ===
-        emotion_audio_branch = None
-        prev_emotion_audio_branch = None
-        if 'emotion' in self.guiding_conditions:
-            # 与原 emotion_dit 一致: audio_norm(audio) * (1 + emo_scale) + emo_shift
-            emotion_audio_branch = self.audio_norm(audio_feat) * (1 + emo_scale) + emo_shift
-            if pre_None:
-                prev_emotion_audio_branch = self.audio_norm(prev_audio_feat) * (1 + emo_scale) + emo_shift
-            else:
-                prev_emotion_audio_branch = self.audio_norm(prev_audio_feat) * (1 + emo_scale) + emo_shift
+                audio_feat = self.audio_norm(audio_feat) * (1 + emo_scale) + emo_shift
 
         if time_step is None:  # len = N = 8
             # Sample time step   采样时间步
@@ -245,10 +223,8 @@ class DitTalkingHead(nn.Module):
         eps = torch.randn_like(motion_feat)  # (N, L=100, d_motion=70)    随机噪声
         motion_feat_noisy = c0 * motion_feat + c1 * eps          # 加噪后的最终噪声   (N, L=100, d_motion=70)
 
-        motion_feat_target = self.denoising_net(motion_feat_noisy, audio_branch,
-                                                prev_motion_feat, prev_audio_branch, time_step, indicator,
-                                                emotion_audio_feat=emotion_audio_branch,
-                                                prev_emotion_audio_feat=prev_emotion_audio_branch)
+        motion_feat_target = self.denoising_net(motion_feat_noisy, audio_feat, 
+                                                prev_motion_feat, prev_audio_feat, time_step, indicator)
 
         return eps, motion_feat_target, motion_feat.detach(), audio_feat_saved.detach()
         # (N=8, L=100, d_motion=70)  ,  # (N=8, L_p + L= 25+100 = 125, motion_feat_dim=70)  , (N=8, L=100, d_coef=d_motion=motion_feat_dim=70) , (N=8, L=100, feature_dim=512)
@@ -316,7 +292,7 @@ class DitTalkingHead(nn.Module):
         # 如果没有先前的运动or音频特征（第一个音频片段），则初始化一个随机值的相同shape的张量
         if prev_motion_feat is None:  # (N, n_prev_motions=10, motion_feat_dim=70)
             # (N, n_prev_motions, d_motion)
-            prev_motion_feat = torch.index_select(self.start_motion_feat, 0, emo_index) # （1, n_prev_motions=10, motion_feat_dim=73） -> (N, n_prev_motions=10, motion_feat_dim=70)
+            prev_motion_feat = torch.index_select(self.start_motion_feat, 0, emo_index) # （1, n_prev_motions=10, motion_feat_dim=70） -> (N, n_prev_motions=10, motion_feat_dim=70)
         pre_None = False
         if prev_audio_feat is None:   # (N, n_prev_motions=10, feature_dim=512)
             # (N, n_prev_motions, feature_dim)
@@ -328,72 +304,44 @@ class DitTalkingHead(nn.Module):
             motion_at_T = torch.randn((batch_size, self.n_motions, self.motion_feat_dim)).to(self.device)
 
         # Prepare input for the reverse diffusion process (including optional classifier-free guidance)
-        # === 双分支 CFG 入口构造 ===
-        # 三种 cfg_cond 组合对应的入口数:
-        #   audio + emotion  -> n_entries = 3 (null / audio-only / audio+emotion)
-        #   audio            -> n_entries = 2 (null / audio)
-        #   emotion          -> n_entries = 2 (no-emo / emo)
-        #   (none)           -> n_entries = 1 (audio+emo)
-        has_audio_cfg = 'audio' in cfg_cond
-        has_emotion_cfg = 'emotion' in cfg_cond
+        # 为反向扩散过程准备输入（包括可选的无分类器引导）
+        if 'audio' in cfg_cond:        # 音频作为条件     this
+            audio_feat_null = self.null_audio_feat.expand(batch_size, self.n_motions, -1)  # (1, 1, feature_dim=512) -> (N=1, L=100, feature_dim=512) 随机值
+        else: 
+            audio_feat_null = audio_feat   # (N, L=100, feature_dim=512)  L:帧数
 
-        audio_null_raw = self.null_audio_feat.expand(batch_size, self.n_motions, -1)  # (N, L, feature_dim)
-        emo_feat_null = self.null_emotion_feat.expand(batch_size, -1, -1)             # (N, 1, feature_dim)
-        if has_emotion_cfg:
-            emo_feat_real = self.emo_embed(emo_index).unsqueeze(1)                    # (N, 1, feature_dim)
+        if 'emotion' in cfg_cond:
+            emotion_feat_null = self.null_emotion_feat.expand(batch_size, -1, -1)   # (N,1,512)
 
-        # 决定每个入口的 raw audio / prev audio / emotion 特征
-        if has_audio_cfg and has_emotion_cfg:
-            n_entries = 3
-            audio_raws   = [audio_null_raw, audio_feat,audio_feat]
-            prev_audio_raws = [prev_audio_feat] * 3
-            emo_feats    = [emo_feat_null, emo_feat_null,emo_feat_real]
-        elif has_audio_cfg:
-            n_entries = 2
-            audio_raws   = [audio_null_raw, audio_feat]
-            prev_audio_raws = [prev_audio_feat] * 2
-            emo_feats    = None
-        elif has_emotion_cfg:
-            n_entries = 2
-            audio_raws   = [audio_feat, audio_feat]
-            prev_audio_raws = [prev_audio_feat] * 2
-            emo_feats    = [emo_feat_null, emo_feat_real]
-        else:
-            n_entries = 1
-            audio_raws   = [audio_feat]
-            prev_audio_raws = [prev_audio_feat]
-            emo_feats    = [emo_feat_real] if 'emotion' in self.guiding_conditions else None
+            # 没音频没情感
+            emo_shift, emo_scale = self.adaLN_modulation(emotion_feat_null).chunk(2, dim=2)  # (N, 1, 512),  (N, 1, 512)
+            audio_feat_null = self.audio_norm(audio_feat_null) * (1 + emo_scale) + emo_shift
+            audio_no_emotion = self.audio_norm(audio_feat) * (1 + emo_scale) + emo_shift
 
-        # === 构造每个入口的 原音频分支 与 情感调制音频分支 ===
-        audio_branch_list = []
-        emotion_audio_branch_list = []
-        prev_audio_branch_list = []
-        prev_emotion_audio_branch_list = []
-        for i in range(n_entries):
-            a_raw = audio_raws[i]
-            pa_raw = prev_audio_raws[i]
+        audio_feat_in = [audio_feat_null]
+        for cond in cfg_cond:
+            if cond == 'audio':
+                if 'emotion' in cfg_cond:
+                    audio_feat_in.append(audio_no_emotion)       # 512dim  有音频没情感
+                else:
+                    audio_feat_in.append(audio_feat)  
+            elif cond == 'emotion':
+                emo_feat = self.emo_embed(emo_index)  # (N, ) -> (N, 512)
+                emo_feat = emo_feat.unsqueeze(1)          # (N, 512) -> (N, 1, 512)
 
-            # 原音频分支 (无 emotion 调制)
-            audio_branch_list.append(self.audio_norm(a_raw))
-            prev_audio_branch_list.append(self.audio_norm(pa_raw))
+                emo_shift, emo_scale = self.adaLN_modulation(emo_feat).chunk(2, dim=2)  # (N, 1, 512),  (N, 1, 512)
+                if pre_None:
+                    prev_audio_feat = self.audio_norm(prev_audio_feat)
+                else:
+                    prev_audio_feat = self.audio_norm(prev_audio_feat) * (1 + emo_scale) + emo_shift
+                audio_feat = self.audio_norm(audio_feat) * (1 + emo_scale) + emo_shift
+                audio_feat_in.append(audio_feat)   # 音频 + 情感
 
-            # 情感调制音频分支
-            if emo_feats is not None:
-                emo_shift_i, emo_scale_i = self.adaLN_modulation(emo_feats[i]).chunk(2, dim=2)
-                emotion_audio_branch_list.append(self.audio_norm(a_raw) * (1 + emo_scale_i) + emo_shift_i)
-                prev_emotion_audio_branch_list.append(self.audio_norm(pa_raw) * (1 + emo_scale_i) + emo_shift_i)
-
-        audio_branch_in = torch.cat(audio_branch_list, dim=0)                  # (nE, L, feature_dim)
-        prev_audio_branch_in = torch.cat(prev_audio_branch_list, dim=0)        # (nE, L_p, feature_dim)
-        prev_motion_feat_in = torch.cat([prev_motion_feat] * n_entries, dim=0)
-        indicator_in = torch.cat([indicator] * n_entries, dim=0) if indicator is not None else None
-
-        if emo_feats is not None:
-            emotion_audio_branch_in = torch.cat(emotion_audio_branch_list, dim=0)
-            prev_emotion_audio_branch_in = torch.cat(prev_emotion_audio_branch_list, dim=0)
-        else:
-            emotion_audio_branch_in = None
-            prev_emotion_audio_branch_in = None
+        n_entries = len(audio_feat_in)                              # 2  随机音频特征（噪声）+ 真实音频特征
+        audio_feat_in = torch.cat(audio_feat_in, dim=0)             # (2, L=100, feature_dim=512)  L:帧数
+        prev_motion_feat_in = torch.cat([prev_motion_feat] * n_entries, dim=0)      # (2, n_prev_motions=10, motion_feat_dim=70)
+        prev_audio_feat_in = torch.cat([prev_audio_feat] * n_entries, dim=0)        # (2, n_prev_motions=10, feature_dim=512)
+        indicator_in = torch.cat([indicator] * n_entries, dim=0) if indicator is not None else None   # (2, self.n_motions=100)
 
         traj = {self.diffusion_sched.num_steps: motion_at_T}          # 去噪的轨迹字典   初始：{50：motion_at_T随机版}   格式：{T: motion_at_T}
         for t in range(self.diffusion_sched.num_steps, 0, -1):   # 50~1   -1表示逆序遍历
@@ -413,10 +361,8 @@ class DitTalkingHead(nn.Module):
             step_in = torch.tensor([t] * batch_size, device=self.device)   # [t,t,...,t]   共N个（1,）   t是确定的值
             step_in = torch.cat([step_in] * n_entries, dim=0)              # （N*2=2,）
 
-            results = self.denoising_net(motion_in, audio_branch_in, prev_motion_feat_in,      # result = (nE, L_p + L, motion_feat_dim)
-                                         prev_audio_branch_in, step_in, indicator_in,
-                                         emotion_audio_feat=emotion_audio_branch_in,
-                                         prev_emotion_audio_feat=prev_emotion_audio_branch_in)
+            results = self.denoising_net(motion_in, audio_feat_in, prev_motion_feat_in,      # result = (N*2=2, L_p + L= 10+100 = 110, motion_feat_dim=70)
+                                         prev_audio_feat_in, step_in, indicator_in)
 
             # Apply thresholding if specified      如果指定，则应用阈值
             # 控制输出张量 results 中的值，使得它们的绝对值不会超过某个预定义的阈值范围
@@ -479,81 +425,91 @@ class DitTalkingHead(nn.Module):
             return traj[0], motion_at_T, audio_feat  # traj[0]：去噪的最终结果(N, L=100, motion_feat_dim=70) 
             #    (1, 100, 70)    (1, 100, 70)    (1, 100, 512)  
 
-# === 双分支注意力: 自注意 + 原音频交叉注意 + 情感调制音频交叉注意 ===
-class DualBranchDecoderLayer(nn.Module):
-    """Decoder block with self-attn + two cross-attentions.
+def modulate(x, shift, scale):
+    # adaLN 调制： x * (1 + scale) + shift
+    return x * (1 + scale) + shift
 
-    ``hidden`` attends to ``audio_memory`` (original lip-sync branch) and
-    optionally to ``emotion_audio_memory`` (emotion-modulated branch).
-    The two cross-attn outputs are linearly combined via ``audio_scale`` and
-    ``emotion_audio_scale`` before the residual update.
+
+class DiTDecoderLayer(nn.Module):
     """
-
-    def __init__(self, feature_dim, n_heads, mlp_ratio=4, dropout=0.1,
-                 audio_scale=0.5, emotion_audio_scale=0.5):
+    adaLN-Zero 风格的 Transformer decoder block。
+    扩散时间步嵌入 t_emb 通过 FiLM(shift/scale/gate) 分别注入到
+    自注意力、交叉注意力、前馈三条路径之间。
+    参考 FaceTalk / DiT：每个 block 独立地接收时间步调制，避免时间步信号随网络加深被稀释。
+    """
+    def __init__(self, d_model, nhead, dim_feedforward, dropout=0.1):
         super().__init__()
-        self.audio_scale = float(audio_scale)
-        self.emotion_audio_scale = float(emotion_audio_scale)
+        self.self_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=True)
+        self.cross_attn = nn.MultiheadAttention(d_model, nhead, dropout=dropout, batch_first=True)
 
-        self.self_attn = nn.MultiheadAttention(
-            feature_dim, n_heads, dropout=dropout, batch_first=True
-        )
-        self.audio_attn = nn.MultiheadAttention(
-            feature_dim, n_heads, dropout=dropout, batch_first=True
-        )
-        self.emotion_audio_attn = nn.MultiheadAttention(
-            feature_dim, n_heads, dropout=dropout, batch_first=True
-        )
-
-        self.norm1 = nn.LayerNorm(feature_dim)
-        self.norm2 = nn.LayerNorm(feature_dim)
-        self.norm3 = nn.LayerNorm(feature_dim)
-        self.dropout1 = nn.Dropout(dropout)
-        self.dropout2 = nn.Dropout(dropout)
-        self.dropout3 = nn.Dropout(dropout)
-        self.linear1 = nn.Linear(feature_dim, mlp_ratio * feature_dim)
-        self.linear2 = nn.Linear(mlp_ratio * feature_dim, feature_dim)
+        # 前馈
+        self.linear1 = nn.Linear(d_model, dim_feedforward)
+        self.linear2 = nn.Linear(dim_feedforward, d_model)
         self.dropout = nn.Dropout(dropout)
+        self.activation = F.gelu
 
-    def forward(self, hidden, audio_memory, emotion_audio_memory=None, audio_mask=None):
-        # self-attention on motion features
-        self_update = self.self_attn(hidden, hidden, hidden, need_weights=False)[0]
-        hidden = self.norm1(hidden + self.dropout1(self_update))
+        # 调制前使用无仿射的 LayerNorm（仿射由 shift/scale 提供）
+        self.norm1 = nn.LayerNorm(d_model, elementwise_affine=False, eps=1e-6)
+        self.norm2 = nn.LayerNorm(d_model, elementwise_affine=False, eps=1e-6)
+        self.norm3 = nn.LayerNorm(d_model, elementwise_affine=False, eps=1e-6)
 
-        # cross-attention to the original audio memory
-        audio_update = self.audio_attn(
-            query=hidden, key=audio_memory, value=audio_memory,
-            attn_mask=audio_mask, need_weights=False,
-        )[0]
-        cond_update = self.audio_scale * audio_update
+        # 由时间步嵌入生成 3 条路径 x (shift, scale, gate) = 9 组调制向量
+        self.adaLN_modulation = nn.Sequential(
+            nn.SiLU(),
+            nn.Linear(d_model, 9 * d_model, bias=True)
+        )
+        # adaLN-Zero: 最后一层零初始化，保证训练初期每个 block 近似恒等（gate=0）
+        nn.init.zeros_(self.adaLN_modulation[-1].weight)
+        nn.init.zeros_(self.adaLN_modulation[-1].bias)
 
-        # cross-attention to the emotion-modulated audio memory (skipped if absent)
-        if emotion_audio_memory is not None:
-            emo_update = self.emotion_audio_attn(
-                query=hidden, key=emotion_audio_memory, value=emotion_audio_memory,
-                attn_mask=audio_mask, need_weights=False,
-            )[0]
-            cond_update = cond_update + self.emotion_audio_scale * emo_update
+    def forward(self, tgt, memory, t_emb, memory_mask=None, tgt_mask=None):
+        # t_emb: (N, 1, d_model)  时间步嵌入，在各路径上广播
+        (shift_sa, scale_sa, gate_sa,
+         shift_ca, scale_ca, gate_ca,
+         shift_ff, scale_ff, gate_ff) = self.adaLN_modulation(t_emb).chunk(9, dim=-1)
 
-        hidden = self.norm2(hidden + self.dropout2(cond_update))
+        # 自注意力
+        h = modulate(self.norm1(tgt), shift_sa, scale_sa)
+        sa = self.self_attn(h, h, h, attn_mask=tgt_mask, need_weights=False)[0]
+        tgt = tgt + gate_sa * sa
 
-        # feed-forward
-        ff = self.linear2(self.dropout(F.gelu(self.linear1(hidden))))
-        hidden = self.norm3(hidden + self.dropout3(ff))
-        return hidden
+        # 交叉注意力（对音频特征 memory）
+        h = modulate(self.norm2(tgt), shift_ca, scale_ca)
+        ca = self.cross_attn(h, memory, memory, attn_mask=memory_mask, need_weights=False)[0]
+        tgt = tgt + gate_ca * ca
+
+        # 前馈
+        h = modulate(self.norm3(tgt), shift_ff, scale_ff)
+        ff = self.linear2(self.dropout(self.activation(self.linear1(h))))
+        tgt = tgt + gate_ff * ff
+
+        return tgt
 
 
-# 去噪网络 DiT（双分支注意力版本）
+class DiTDecoder(nn.Module):
+    """DiTDecoderLayer 的堆叠，逐层向每个 block 传入扩散时间步嵌入。"""
+    def __init__(self, d_model, nhead, dim_feedforward, num_layers, dropout=0.1):
+        super().__init__()
+        self.layers = nn.ModuleList([
+            DiTDecoderLayer(d_model, nhead, dim_feedforward, dropout=dropout)
+            for _ in range(num_layers)
+        ])
+
+    def forward(self, tgt, memory, t_emb, memory_mask=None, tgt_mask=None):
+        for layer in self.layers:
+            tgt = layer(tgt, memory, t_emb, memory_mask=memory_mask, tgt_mask=tgt_mask)
+        return tgt
+
+
+# 去噪网络 DiT
 class DenoisingNetwork(nn.Module):
-    def __init__(self, device='cuda', motion_feat_dim=70,
-                 use_indicator=None, architecture="decoder", feature_dim=512, n_heads=8,
+    def __init__(self, device='cuda', motion_feat_dim=70, 
+                 use_indicator=None, architecture="decoder", feature_dim=512, n_heads=8, 
                  n_layers=8, mlp_ratio=4, align_mask_width=1, no_use_learnable_pe=True, n_prev_motions=10,
-                 n_motions=100, n_diff_steps=500,
-                 # dual-branch attention params
-                 audio_scale=0.5, emotion_audio_scale=0.5):
+                 n_motions=100, n_diff_steps=500, ):
         super().__init__()
         # Model parameters
-        self.motion_feat_dim = motion_feat_dim     # 推理73
+        self.motion_feat_dim = motion_feat_dim     # 推理70
         self.use_indicator = use_indicator
 
         # Transformer
@@ -566,7 +522,7 @@ class DenoisingNetwork(nn.Module):
         self.use_learnable_pe = not no_use_learnable_pe  # 是否使用可学习的位置编码 False
 
         # sequence length
-        self.n_prev_motions = n_prev_motions   # 先前运动特征数（帧
+        self.n_prev_motions = n_prev_motions   # 先前运动特征数（帧         
         self.n_motions = n_motions             # 当前运动特征数（帧
 
         # Temporal embedding for the diffusion time step   扩散时间步长的时间嵌入
@@ -583,24 +539,17 @@ class DenoisingNetwork(nn.Module):
         else:       # this
             self.PE = PositionalEncoding(self.feature_dim)   #  512         # self.PE.pe : (1, 600, 512)
 
-        # === 双分支 Transformer decoder ===
+        # Transformer decoder
         if self.architecture == 'decoder':
-            self.feature_proj = nn.Linear(self.motion_feat_dim + (1 if self.use_indicator else 0),   # （73or74) or (70or71) -> 512
+            self.feature_proj = nn.Linear(self.motion_feat_dim + (1 if self.use_indicator else 0),   # （70or74) or (70or71) -> 512
                                           self.feature_dim)
-            # 用 DualBranchDecoderLayer 列表替换 nn.TransformerDecoder
-            self.layers = nn.ModuleList([
-                DualBranchDecoderLayer(
-                    feature_dim=self.feature_dim,
-                    n_heads=self.n_heads,
-                    mlp_ratio=self.mlp_ratio,
-                    dropout=0.1,                     # 与原 nn.TransformerDecoderLayer 默认保持一致
-                    audio_scale=audio_scale,
-                    emotion_audio_scale=emotion_audio_scale,
-                )
-                for _ in range(self.n_layers)
-            ])
-            # 删除原 self.transformer 占位（若需要兼容外部访问，可保留为 None）
-            self.transformer = None
+            # adaLN-Zero DiT decoder：扩散时间步逐层注入到每个 block 的自注意力/交叉注意力/前馈之间
+            self.transformer = DiTDecoder(
+                d_model=self.feature_dim,         # 输入和输出的特征维度  512
+                nhead=self.n_heads,               # 注意力头数   8
+                dim_feedforward=self.mlp_ratio * self.feature_dim,  # 前馈层的维度   4 * 512
+                num_layers=self.n_layers          # num_layers 个块（层）
+            )
             if self.align_mask_width > 0:     # 1
                 motion_len = self.n_prev_motions + self.n_motions   # Lp + L =  125
                 alignment_mask = enc_dec_mask(motion_len, motion_len, frame_width=1, expansion=self.align_mask_width - 1)     # (Lp + L, Lp + L)
@@ -614,9 +563,9 @@ class DenoisingNetwork(nn.Module):
 
         # Motion decoder  运动解码器
         self.motion_dec = nn.Sequential(
-            nn.Linear(self.feature_dim, self.feature_dim // 2),     # 512 -> 512
+            nn.Linear(self.feature_dim, self.feature_dim // 2),     # 512 -> 256
             nn.GELU(),
-            nn.Linear(self.feature_dim // 2, self.motion_feat_dim),  # 512 -> 70
+            nn.Linear(self.feature_dim // 2, self.motion_feat_dim),  # 256 -> 70
             # nn.Tanh() # 增加了一个tanh
             # nn.Softmax()
         )
@@ -627,22 +576,24 @@ class DenoisingNetwork(nn.Module):
     def device(self):
         return next(self.parameters()).device
 
-    def forward(self, motion_feat, audio_feat, prev_motion_feat, prev_audio_feat, step, indicator=None,
-                emotion_audio_feat=None, prev_emotion_audio_feat=None):
+    def forward(self, motion_feat, audio_feat, prev_motion_feat, prev_audio_feat, step, indicator=None):
         """
         Args:
             motion_feat: (N, L, d_motion). Noisy motion feature    forward(N=8, L=100, d_motion=70) 加噪后的最终噪声         sample: (2, 100, 70)  当前step的噪声（用于预测前一step的）
-            audio_feat: (N, L, feature_dim)   forward: 原音频分支 (N=8, L=100, feature_dim=512)     sample时：随机+真实(2, L=100, feature_dim=512)
+            audio_feat: (N, L, feature_dim)   forward：“屏蔽”后的音频特征(N=8, L=100, feature_dim=512)     sample时：随机+真实(2, L=100, feature_dim=512)
             prev_motion_feat: (N, L_p, d_motion). Padded previous motion coefficients or feature  填充的先前运动特征 forward(8, n_prev_motions=25, motion_feat_dim=70)   sample(N, n_prev_motions=10, motion_feat_dim=70)
-            prev_audio_feat: (N, L_p, d_audio). Padded previous audio features for 原音频分支  forward(8, n_prev_motions=25, feature_dim=512)      sample(N, n_prev_motions=10, feature_dim=512)
+            prev_audio_feat: (N, L_p, d_audio). Padded previous motion coefficients or feature    填充的先前音频特征 forward(8, n_prev_motions=25, feature_dim=512)      sample(N, n_prev_motions=10, motion_feat_dim=512)
             step: (N,)                                         时间步，1~500的随机值  forward(8,)       sample(2,)
             indicator: (N, L). 0/1 indicator for the real (unpadded) motion feature  # (N, L) None      forward(8,100)       sample(2,100)
-            emotion_audio_feat: (N, L, feature_dim) or None. 情感调制音频分支 (forward=None 时跳过该分支)
-            prev_emotion_audio_feat: (N, L_p, feature_dim) or None.
         Returns:
             motion_feat_target: (N, L_p + L, d_motion)    forward(8, 125, 70)   sample(2, 110, 70)
         """
-        # Diffusion time step embedding  扩散时间步长嵌入
+        # Diffusion time step embedding  扩散时间步长嵌入  
+        # TE.pe                shape: [1, n_diff_steps + 1=501, d_model=512]
+        # TE.pe[0, step]       shape: [d_model=512]        维度1的位置0，维度2的位置step  批次0的第step步
+        # self.TE.pe[0, step]                               (N=8, diff_step_dim=512)   
+        # self.diff_step_map(self.TE.pe[0, step])           (N=8, diff_step_dim=512)   
+
         diff_step_embedding = self.diff_step_map(self.TE.pe[0, step]).unsqueeze(1)    # 时间步嵌入 forward(N=8 or 2, 1, diff_step_dim=512)    (N=2, 1, diff_step_dim=512)
 
         # 指示器用于指示 最后一个音频片段 中 填充的部分。
@@ -653,48 +604,41 @@ class DenoisingNetwork(nn.Module):
 
         # Concat features and embeddings  拼接（先前运动）特征和（指示器）嵌入
         if self.architecture == 'decoder':
-            feats_in = torch.cat([prev_motion_feat, motion_feat], dim=1)  # (N, L_p + L, d_motion)
-        else:
+            # print("prev_motion_feat: ", prev_motion_feat.shape, "motion_feat: ", motion_feat.shape)
+            feats_in = torch.cat([prev_motion_feat, motion_feat], dim=1)  # (N, L_p + L, d_motion) 
+        else:       
             raise ValueError(f'Unknown architecture: {self.architecture}')
-        if self.use_indicator:   # 拼接指示器
+        if self.use_indicator:   # 拼接指示器   
             feats_in = torch.cat([feats_in, indicator], dim=-1)  # (N, L_p + L, d_motion)+(N, L_p + L, 1) = (N, L_p + L, d_motion + 1 )
 
         feats_in = self.feature_proj(feats_in)  # (N, L_p + L=125 or 110, 70 or 70) -> (N, L_p + L=125 or 110, feature_dim=512)
+        # feats_in = torch.cat([person_feat, feats_in], dim=1)  # (N, 1 + L_p + L, feature_dim)
 
         if self.use_learnable_pe:      # 可学习的位置嵌入
-            feats_in = feats_in + self.PE + diff_step_embedding
+            # 时间步不再在入口相加，改为逐层 adaLN-Zero 注入（见下方 transformer 调用）
+            feats_in = feats_in + self.PE  # (N, L_p + L, feature_dim=512) + (1, 1 + L_p + L, feature_dim=512)
         else:
-            feats_in = self.PE(feats_in) + diff_step_embedding  # (N, L_p + L, feature_dim=512)
+            # 时间步不再在入口相加，改为逐层 adaLN-Zero 注入（见下方 transformer 调用）
+            feats_in = self.PE(feats_in)  # (N, L_p + L, feature_dim=512)
 
-        # === 双分支 attention: 原音频记忆 + 情感调制音频记忆 ===
-        if self.architecture == 'decoder':
-            audio_memory = torch.cat([prev_audio_feat, audio_feat], dim=1)        # (N, L_p + L, feature_dim)
-            emotion_audio_memory = None
-            if emotion_audio_feat is not None:
-                # 当 prev_emotion_audio_feat 未给出时退化为 prev_audio_feat (兼容旧调用)
-                if prev_emotion_audio_feat is None:
-                    prev_emotion_audio_feat = prev_audio_feat
-                emotion_audio_memory = torch.cat([prev_emotion_audio_feat, emotion_audio_feat], dim=1)
-            hidden = feats_in
-            for layer in self.layers:
-                hidden = layer(
-                    hidden,
-                    audio_memory=audio_memory,
-                    emotion_audio_memory=emotion_audio_memory,
-                    audio_mask=self.alignment_mask,
-                )
-            feat_out = hidden
+        # Transformer
+        if self.architecture == 'decoder':   # forard(N, n_prev_motions=25, feature_dim=512) cat (N=8, L=100, feature_dim=512) = (8 125 512)
+            audio_feat_in = torch.cat([prev_audio_feat, audio_feat], dim=1)        # (N, L_p + L, d_audio= feature_dim=512)
+            # diff_step_embedding: (N, 1, 512) 逐层作为 FiLM 调制注入每个 DiT block
+            feat_out = self.transformer(feats_in, audio_feat_in, diff_step_embedding,
+                                        memory_mask=self.alignment_mask)     # (N, L_p + L, d_audio= feature_dim=512)
         else:
             raise ValueError(f'Unknown architecture: {self.architecture}')
 
         # Decode predicted motion feature noise / sample
+        # motion_feat_target = self.motion_dec(feat_out[:, 1:])  # (N, L_p + L, d_motion)
         motion_feat_target = self.motion_dec(feat_out)          # (N, L_p + L=110, 512 -> 512 -> 70)
 
         return motion_feat_target
 
 if __name__ == "__main__":
     device = "cuda"
-    motion_feat_dim = 70
+    motion_feat_dim = 76
     n_motions = 100 # L
     n_prev_motions = 10 # L_p
 

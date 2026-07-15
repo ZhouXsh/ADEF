@@ -1,4 +1,9 @@
-## emotion_dit_myfinalv1.py的基础上，扩大模型参数
+'''
+2026年7月12日 emotion_dit_myfinalv1.py的基础上，扩大模型参数，包括：
+feature_dim: 512 to 640
+n_layers: 8 to 10
+n_heads: 8 to 10
+'''
 
 import torch
 import torch.nn as nn
@@ -110,7 +115,7 @@ class DitTalkingHead(nn.Module):
         self.denoising_net = DenoisingNetwork(device=device, n_motions=self.n_motions, n_prev_motions=self.n_prev_motions,
                                               motion_feat_dim=self.motion_feat_dim, feature_dim=feature_dim,
                                               n_layers=n_layers, n_heads=n_heads, mlp_ratio=mlp_ratio,
-                                              align_mask_width=align_mask_width,
+                                              align_mask_width=align_mask_width, n_diff_steps=n_diff_steps,
                                               audio_scale=audio_scale, emotion_audio_scale=emotion_audio_scale)
         # diffusion schedule    扩散调度器
         # 这个模块定义了扩散过程中的噪声调度，它决定了噪声在不同扩散步骤中的变化方式。例如，使用余弦调度时，噪声会逐渐减小。
@@ -218,9 +223,9 @@ class DitTalkingHead(nn.Module):
         # === 双分支构造: 原始 audio 分支 (无 emotion 调制) ===
         audio_branch = self.audio_norm(audio_feat)
         if pre_None:
-            prev_audio_branch = prev_audio_feat
+            prev_audio_branch = self.audio_norm(prev_audio_feat)
         else:
-            prev_audio_branch = prev_audio_feat
+            prev_audio_branch = self.audio_norm(prev_audio_feat)
 
         # === 双分支构造: emotion-modulated audio 分支 ===
         emotion_audio_branch = None
@@ -229,9 +234,9 @@ class DitTalkingHead(nn.Module):
             # 与原 emotion_dit 一致: audio_norm(audio) * (1 + emo_scale) + emo_shift
             emotion_audio_branch = self.audio_norm(audio_feat) * (1 + emo_scale) + emo_shift
             if pre_None:
-                prev_emotion_audio_branch = prev_audio_feat * (1 + emo_scale) + emo_shift
+                prev_emotion_audio_branch = self.audio_norm(prev_audio_feat) * (1 + emo_scale) + emo_shift
             else:
-                prev_emotion_audio_branch = prev_audio_feat * (1 + emo_scale) + emo_shift
+                prev_emotion_audio_branch = self.audio_norm(prev_audio_feat) * (1 + emo_scale) + emo_shift
 
         if time_step is None:  # len = N = 8
             # Sample time step   采样时间步
@@ -375,13 +380,13 @@ class DitTalkingHead(nn.Module):
 
             # 原音频分支 (无 emotion 调制)
             audio_branch_list.append(self.audio_norm(a_raw))
-            prev_audio_branch_list.append(pa_raw)
+            prev_audio_branch_list.append(self.audio_norm(pa_raw))
 
             # 情感调制音频分支
             if emo_feats is not None:
                 emo_shift_i, emo_scale_i = self.adaLN_modulation(emo_feats[i]).chunk(2, dim=2)
                 emotion_audio_branch_list.append(self.audio_norm(a_raw) * (1 + emo_scale_i) + emo_shift_i)
-                prev_emotion_audio_branch_list.append(pa_raw * (1 + emo_scale_i) + emo_shift_i)
+                prev_emotion_audio_branch_list.append(self.audio_norm(pa_raw) * (1 + emo_scale_i) + emo_shift_i)
 
         audio_branch_in = torch.cat(audio_branch_list, dim=0)                  # (nE, L, feature_dim)
         prev_audio_branch_in = torch.cat(prev_audio_branch_list, dim=0)        # (nE, L_p, feature_dim)
@@ -694,7 +699,7 @@ class DenoisingNetwork(nn.Module):
 
 if __name__ == "__main__":
     device = "cuda"
-    motion_feat_dim = 76
+    motion_feat_dim = 70
     n_motions = 100 # L
     n_prev_motions = 10 # L_p
 

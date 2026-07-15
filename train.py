@@ -24,12 +24,28 @@ from src.dataset.dataset_EmotionLevel import EmoLevelDataset
 # device_id = 1  # 选择 GPU
 
 # from src.modules.emotion_dit_prev_modi import DitTalkingHead
-# g_exp_name = '20260615毕设去掉两层调制_prevAudio都调制_并调整sample的逻辑' 
-# device_id = 2  # 选择 GPU
+# g_exp_name = '20260630毕设去掉两层调制_修改train错误的loss累积_prev_modi' 
+# device_id = 3  # 选择 GPU
 
-from src.modules.emotion_dit import DitTalkingHead
-g_exp_name = '20260625毕设去掉两层调制_修改train错误的loss累积' 
-device_id = 6  # 选择 GPU
+# from src.modules.emotion_dit import DitTalkingHead
+# g_exp_name = '20260630毕设去掉两层调制_修改train错误的loss累积' 
+# device_id = 7  # 选择 GPU
+
+# from src.modules.emotion_dit_myfinalv1 import DitTalkingHead
+# g_exp_name = "20260712_emotion_dit_myfinalv1"
+# device_id = 1
+
+# from src.modules.emotion_dit_timestep_0714 import DitTalkingHead
+# g_exp_name = "20260714_emotion_dit_timestep_0714"
+# device_id = 2
+
+# from src.modules.emotion_dit_youhua_0714 import DitTalkingHead
+# g_exp_name = "20260714_emotion_dit_youhua_0714"
+# device_id = 3
+
+from src.modules.emotion_dit_youhua_0715 import DitTalkingHead
+g_exp_name = "20260715_emotion_dit_youhua_0715"
+device_id = 1
 
 torch.cuda.set_device(device_id)  # 设置默认 GPU
 device = torch.device(f"cuda:{device_id}" if torch.cuda.is_available() else "cpu")  # 显式指定设备
