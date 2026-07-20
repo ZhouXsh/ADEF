@@ -42,6 +42,7 @@ class DitTalkingHead(BaseDitTalkingHead):
             audio_feat_saved = audio_or_feat
         else:
             raise ValueError(f'Incorrect audio input shape {audio_or_feat.shape}')
+        audio_feat = audio_feat_saved.clone() 
 
         if prev_motion_feat is None:
             prev_motion_feat = torch.index_select(
@@ -57,7 +58,7 @@ class DitTalkingHead(BaseDitTalkingHead):
         # Conditional branch: real audio + real emotion.
         emo_feat = self.emo_embed(emo_index).unsqueeze(1)
         emo_shift, emo_scale = self.adaLN_modulation(emo_feat).chunk(2, dim=2)
-        audio_feat_cond = self.audio_norm(audio_feat_saved) * (1 + emo_scale) + emo_shift
+        audio_feat_cond = self.audio_norm(audio_feat) * (1 + emo_scale) + emo_shift
 
         # Keep the original previous-audio handling unchanged.
         if prev_audio_is_start:

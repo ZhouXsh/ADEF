@@ -225,25 +225,24 @@ class ADEFPipeline(object):
             else:        # "exp", "lip", "eyes"
                 R_new = R_s           # 直接copy参考图像的旋转矩阵 (B=1, 3, 3)
 
-            # delta_new = x_s_info['exp'].clone()   # （1,21,3）
-            # if inf_cfg.animation_region == "all" or inf_cfg.animation_region == "exp":  # "exp", "pose", "lip", "eyes", "all"
-            #     # 相对
-            #     delta_new = x_s_info['exp'] + (x_d_i_info['exp'] - x_d_0_info['exp'])   # 原图变化+相对首帧变化
-            #     for lip_idx in [6, 12, 14, 17, 19, 20]:
-            #         delta_new[:, lip_idx, :] = x_d_i_info['exp'][:, lip_idx, :]
-            #     # # 绝对
-            #     # delta_new = x_s_info['exp'].clone()
-            #     # for idx in [1,2,6,11,12,13,14,15,16,17,18,19,20]:
-            #     #     delta_new[:, idx, :] = x_d_i_info['exp'][:, idx, :]
-            #     # delta_new[:, 3:5, 1] =  x_d_i_info['exp'][:, 3:5, 1]
-            #     # delta_new[:, 5, 2] =  x_d_i_info['exp'][:, 5, 2]
-            #     # delta_new[:, 8, 2] =  x_d_i_info['exp'][:, 8, 2]
-            #     # delta_new[:, 9, 1:] = x_d_i_info['exp'][:, 9, 1:]
-            # elif inf_cfg.animation_region == "lip":
-            #     for lip_idx in [6, 12, 14, 17, 19, 20]:
-            #         delta_new[:, lip_idx, :] = (x_s_info['exp'] + (x_d_i_info['exp'] - x_d_0_info['exp']))[:, lip_idx, :]
-            delta_new = x_d_i_info['exp']
-
+            delta_new = x_s_info['exp'].clone()   # （1,21,3）
+            if inf_cfg.animation_region == "all" or inf_cfg.animation_region == "exp":  # "exp", "pose", "lip", "eyes", "all"
+                # 相对
+                delta_new = x_s_info['exp'] + (x_d_i_info['exp'] - x_d_0_info['exp'])   # 原图变化+相对首帧变化
+                for lip_idx in [6, 12, 14, 17, 19, 20]:
+                    delta_new[:, lip_idx, :] = x_d_i_info['exp'][:, lip_idx, :]
+                # # 绝对
+                # delta_new = x_s_info['exp'].clone()
+                # for idx in [1,2,6,11,12,13,14,15,16,17,18,19,20]:
+                #     delta_new[:, idx, :] = x_d_i_info['exp'][:, idx, :]
+                # delta_new[:, 3:5, 1] =  x_d_i_info['exp'][:, 3:5, 1]
+                # delta_new[:, 5, 2] =  x_d_i_info['exp'][:, 5, 2]
+                # delta_new[:, 8, 2] =  x_d_i_info['exp'][:, 8, 2]
+                # delta_new[:, 9, 1:] = x_d_i_info['exp'][:, 9, 1:]
+            elif inf_cfg.animation_region == "lip":
+                for lip_idx in [6, 12, 14, 17, 19, 20]:
+                    delta_new[:, lip_idx, :] = (x_s_info['exp'] + (x_d_i_info['exp'] - x_d_0_info['exp']))[:, lip_idx, :]
+            
             # scale  缩放
             scale_new = x_s_info['scale'] * (x_d_i_info['scale'] / x_d_0_info['scale'])   # （1,1）
 
