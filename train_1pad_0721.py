@@ -243,6 +243,7 @@ def train(
     save_dir,
     scheduler=None,
     writer=None,
+    start_iter=0,
     classifier=None,
 ):
     save_dir.mkdir(parents=True, exist_ok=True)
@@ -252,7 +253,7 @@ def train(
     loss_log = defaultdict(lambda: deque(maxlen=args.log_smooth_win))
     optimizer.zero_grad()
 
-    for it in range(args.max_iter + 1):
+    for it in range(start_iter, args.max_iter + 1):
         batch = _prepare_model_inputs(next(data_loader), model.device)
         audio_pair, coef_pair, canonical_pair, emo_index, _ = batch
         totals = _run_pair(
@@ -290,6 +291,8 @@ def train(
                 writer,
                 it,
             )
+            if writer is not None:
+                writer.add_scalar("opt/lr", optimizer.param_groups[0]["lr"], it)
         if scheduler is not None:
             if args.scheduler != "WarmupThenDecay" or it < args.cos_max_iter:
                 scheduler.step()
@@ -298,7 +301,7 @@ def train(
                 {"args": args, "model": model.state_dict(), "iter": it},
                 save_dir / f"iter_{it:07}.pt",
             )
-        if it % args.val_iter == 0 or it == args.max_iter:
+        if it % args.val_iter == 0 or it == 0 or it == args.max_iter:
             val(args, model, val_loader, it, writer, classifier)
 
 
@@ -335,6 +338,10 @@ def val(args, model, loader, current_iter, writer, classifier):
         model.train()
 
 
+def count_parameters(model):
+    return sum(parameter.numel() for parameter in model.parameters() if parameter.requires_grad)
+
+
 def main(args, option_text=None):
     model = DitTalkingHead(
         device=device,
@@ -350,9 +357,16 @@ def main(args, option_text=None):
         diff_schedule=args.diff_schedule,
         cfg_mode=args.cfg_mode,
         guiding_conditions=args.guiding_conditions,
+        align_mask_width=args.align_mask_width,
+        no_use_learnable_pe=args.no_use_learnable_pe,
+        use_indicator=args.use_indicator,
+        n_heads=args.n_heads,
+        n_layers=args.n_layers,
+        mlp_ratio=args.mlp_ratio,
     )
 
     exp_dir = Path("experiments/emo_dit") / args.exp_name
+    start_iter = 0
     train_dataset = EmoLevelDataset(
         args.data_root,
         motion_filename=args.motion_filename,
@@ -403,6 +417,7 @@ def main(args, option_text=None):
     if option_text is not None:
         with open(log_dir / "options.log", "w", encoding="utf-8") as file:
             file.write(option_text)
+        writer.add_text("options", option_text)
 
     logging.basicConfig(
         filename=os.path.join(str(log_dir), "log.txt"),
@@ -411,6 +426,8 @@ def main(args, option_text=None):
         datefmt="%Y/%m/%d %H:%M:%S",
     )
     logging.getLogger().addHandler(logging.StreamHandler(sys.stdout))
+    logging.info(f"exp_name: {exp_dir.name}")
+    logging.info(f"model parameters: {count_parameters(model)}")
 
     optimizer = torch.optim.Adam(
         filter(lambda parameter: parameter.requires_grad, model.parameters()),
@@ -441,42 +458,89 @@ def main(args, option_text=None):
         exp_dir / "checkpoints",
         scheduler,
         writer,
-        classifier,
+        start_iter=start_iter,
+        classifier=classifier,
     )
 
 
 def build_parser():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", type=str, default="train")
+    parser.add_argument("--mode", type=str, default="train", choices=["train", "test"])
+    parser.add_argument("--iter", type=int, default=1, help="iteration to test")
     parser.add_argument("--exp_name", type=str, default=g_exp_name)
+
     parser.add_argument("--data_root", type=Path, default="src/my_prepare/")
     parser.add_argument("--motion_filename", type=str, default="front_all_motions.pkl")
     parser.add_argument("--motion_template_filename", type=str, default="motion_template.pkl")
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--crop_strategy", type=str, default="random")
-    parser.add_argument("--normalize_type", type=str, default="mix")
+    parser.add_argument(
+        "--normalize_type",
+        type=str,
+        default="mix",
+        choices=["std", "case", "scale", "minmax", "mix"],
+    )
+
     parser.add_argument("--target", type=str, default="sample", choices=["sample", "noise"])
     parser.add_argument("--guiding_conditions", type=str, default="audio,emotion")
-    parser.add_argument("--cfg_mode", type=str, default="incremental")
+    parser.add_argument("--cfg_mode", type=str, default="incremental", choices=["incremental", "independent"])
     parser.add_argument("--n_diff_steps", type=int, default=50)
-    parser.add_argument("--diff_schedule", type=str, default="cosine")
+    parser.add_argument(
+        "--diff_schedule",
+        type=str,
+        default="cosine",
+        choices=["linear", "cosine", "quadratic", "sigmoid"],
+    )
     parser.add_argument("--no_head_pose", action="store_true", default=False)
-    parser.add_argument("--rot_repr", type=str, default="aa")
-    parser.add_argument("--audio_model", type=str, default="wav2vec2")
-    parser.add_argument("--architecture", type=str, default="decoder")
-    parser.add_argument("--use_indicator", action="store_true", default=True)
+    parser.add_argument("--rot_repr", type=str, default="aa", choices=["aa"])
+
+    parser.add_argument(
+        "--audio_model",
+        type=str,
+        default="wav2vec2",
+        choices=["wav2vec2", "hubert", "hubert_zh", "hubert_zh_ori"],
+    )
+    parser.add_argument("--architecture", type=str, default="decoder", choices=["decoder"])
+    parser.add_argument(
+        "--align_mask_width",
+        type=int,
+        default=1,
+        help="width of the alignment mask, non-positive for no mask",
+    )
+    parser.add_argument(
+        "--no_use_learnable_pe",
+        action="store_true",
+        help="do not use learnable positional encoding",
+    )
+    parser.add_argument(
+        "--use_indicator",
+        action="store_true",
+        default=True,
+        help="use indicator for padded frames",
+    )
     parser.add_argument("--feature_dim", type=int, default=512)
+    parser.add_argument("--n_heads", type=int, default=8)
+    parser.add_argument("--n_layers", type=int, default=6)
+    parser.add_argument("--mlp_ratio", type=int, default=4)
+
     parser.add_argument("--n_motions", type=int, default=100)
     parser.add_argument("--n_prev_motions", type=int, default=25)
     parser.add_argument("--motion_feat_dim", type=int, default=70)
     parser.add_argument("--fps", type=int, default=25)
-    parser.add_argument("--pad_mode", type=str, default="zero")
+    parser.add_argument("--pad_mode", type=str, default="zero", choices=["zero", "replicate"])
+
     parser.add_argument("--max_iter", type=int, default=100000)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
-    parser.add_argument("--scheduler", type=str, default="WarmupThenDecay")
-    parser.add_argument("--criterion", type=str, default="l2")
+    parser.add_argument(
+        "--scheduler",
+        type=str,
+        default="WarmupThenDecay",
+        choices=["None", "Warmup", "WarmupThenDecay"],
+    )
+
+    parser.add_argument("--criterion", type=str, default="l2", choices=["l1", "l2"])
     parser.add_argument("--clip_grad", default=True, action="store_true")
     parser.add_argument("--l_exp", type=float, default=0.1)
     parser.add_argument("--l_exp_vel", type=float, default=1e-4)
@@ -486,13 +550,16 @@ def build_parser():
     parser.add_argument("--l_head_smooth", type=float, default=1e-2)
     parser.add_argument("--l_head_trans", type=float, default=1e-2)
     parser.add_argument("--no_constrain_prev", action="store_true")
+
     parser.add_argument("--use_context_audio_feat", action="store_true")
     parser.add_argument("--trunc_prob1", type=float, default=0.3)
     parser.add_argument("--trunc_prob2", type=float, default=0.4)
+
     parser.add_argument("--save_iter", type=int, default=1000)
     parser.add_argument("--val_iter", type=int, default=50)
     parser.add_argument("--log_iter", type=int, default=50)
     parser.add_argument("--log_smooth_win", type=int, default=50)
+
     parser.add_argument("--warm_iter", type=int, default=10000)
     parser.add_argument("--cos_max_iter", type=int, default=100000)
     parser.add_argument("--min_lr_ratio", type=float, default=0.02)
