@@ -32,6 +32,14 @@ def load_model(ckpt_path, model_config, device, model_type):
         guiding_conditions=_get_arg(
             model_args, "guiding_conditions", "audio,emotion"
         ),
+        align_mask_width=_get_arg(model_args, "align_mask_width", 1),
+        no_use_learnable_pe=_get_arg(
+            model_args, "no_use_learnable_pe", False
+        ),
+        use_indicator=_get_arg(model_args, "use_indicator", True),
+        n_heads=_get_arg(model_args, "n_heads", 8),
+        n_layers=_get_arg(model_args, "n_layers", 6),
+        mlp_ratio=_get_arg(model_args, "mlp_ratio", 4),
     )
 
     state_dict = dict(model_data["model"])
