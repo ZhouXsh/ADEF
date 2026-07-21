@@ -170,6 +170,12 @@ class DitTalkingHead(JointDitTalkingHead):
         cfg_mode="incremental",
         guiding_conditions="audio,emotion",
         emo_classes=8,
+        align_mask_width=1,
+        no_use_learnable_pe=False,
+        use_indicator=True,
+        n_heads=8,
+        n_layers=6,
+        mlp_ratio=4,
     ):
         super().__init__(
             device=device,
@@ -187,14 +193,28 @@ class DitTalkingHead(JointDitTalkingHead):
             guiding_conditions=guiding_conditions,
             emo_classes=emo_classes,
         )
+
+        self.align_mask_width = align_mask_width
+        self.no_use_learnable_pe = no_use_learnable_pe
+        self.use_indicator = use_indicator
+        self.n_heads = n_heads
+        self.n_layers = n_layers
+        self.mlp_ratio = mlp_ratio
+
         self.denoising_net = DenoisingNetwork(
             device=device,
-            architecture=architecture,
-            n_motions=n_motions,
-            n_prev_motions=n_prev_motions,
-            n_diff_steps=n_diff_steps,
             motion_feat_dim=motion_feat_dim,
+            use_indicator=use_indicator,
+            architecture=architecture,
             feature_dim=feature_dim,
+            n_heads=n_heads,
+            n_layers=n_layers,
+            mlp_ratio=mlp_ratio,
+            align_mask_width=align_mask_width,
+            no_use_learnable_pe=no_use_learnable_pe,
+            n_prev_motions=n_prev_motions,
+            n_motions=n_motions,
+            n_diff_steps=n_diff_steps,
         )
         self._sample_canonical_kp_feat = None
         self.to(device)
