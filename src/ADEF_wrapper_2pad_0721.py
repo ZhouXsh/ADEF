@@ -1,6 +1,7 @@
 import cv2
 import torch
 
+from . import ADEF_wrapper as base_wrapper_module
 from .ADEF_wrapper import ADEFWrapper as BaseADEFWrapper
 from .utils.helper_2pad_0721 import load_model
 from .utils.io import load_image_rgb, resize_to_limit
@@ -8,20 +9,15 @@ from .utils.io import load_image_rgb, resize_to_limit
 
 class ADEFWrapper(BaseADEFWrapper):
     def __init__(self, inference_cfg):
-        super().__init__(inference_cfg)
-        self.motion_generator, self.motion_generator_args = load_model(
-            inference_cfg.checkpoint_MotionGenerator,
-            self.model_config,
-            self.device,
-            "motion_generator",
-        )
-        self.n_motions = self.motion_generator_args.n_motions
-        self.n_prev_motions = self.motion_generator_args.n_prev_motions
-        self.fps = self.motion_generator_args.fps
-        self.audio_unit = 16000.0 / self.fps
-        self.n_audio_samples = round(self.audio_unit * self.n_motions)
-        self.pad_mode = self.motion_generator_args.pad_mode
-        self.use_indicator = self.motion_generator_args.use_indicator
+        # BaseADEFWrapper resolves load_model from its own module namespace.
+        # Replace it only during initialization so the 127-token checkpoint is
+        # instantiated with the matching 2pad model instead of the old model.
+        base_load_model = base_wrapper_module.load_model
+        base_wrapper_module.load_model = load_model
+        try:
+            super().__init__(inference_cfg)
+        finally:
+            base_wrapper_module.load_model = base_load_model
         self.cropper = None
 
     def _stat_tensor(self, key, dtype, device):
