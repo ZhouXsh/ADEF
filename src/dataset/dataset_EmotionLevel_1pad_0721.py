@@ -98,16 +98,16 @@ class EmoLevelDataset(data.Dataset):
             template["std_exp"] + self.eps
         )
         pose = np.concatenate((
-            (frame["scale"].flatten() - template["min_scale"]) /
-            (template["max_scale"] - template["min_scale"] + self.eps),
-            (frame["t"].flatten() - template["min_t"]) /
-            (template["max_t"] - template["min_t"] + self.eps),
-            (frame["pitch"].flatten() - template["min_pitch"]) /
-            (template["max_pitch"] - template["min_pitch"] + self.eps),
-            (frame["yaw"].flatten() - template["min_yaw"]) /
-            (template["max_yaw"] - template["min_yaw"] + self.eps),
-            (frame["roll"].flatten() - template["min_roll"]) /
-            (template["max_roll"] - template["min_roll"] + self.eps),
+            (frame["scale"].flatten() - template["mean_scale"]) /
+            (template["std_scale"] + self.eps),
+            (frame["t"].flatten() - template["mean_t"]) /
+            (template["std_t"] + self.eps),
+            (frame["pitch"].flatten() - template["mean_pitch"]) /
+            (template["std_pitch"] + self.eps),
+            (frame["yaw"].flatten() - template["mean_yaw"]) /
+            (template["std_yaw"] + self.eps),
+            (frame["roll"].flatten() - template["mean_roll"]) /
+            (template["std_roll"] + self.eps),
         ))
         return exp, pose
 

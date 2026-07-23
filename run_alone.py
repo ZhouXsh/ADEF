@@ -3,7 +3,7 @@ import subprocess
 import sys
 import time
 
-exam_name = '20260615毕设去掉两层调制_prevAudio都调制_并调整sample的逻辑'
+exam_name = '20260720_emotion_dit_Unification'
 
 from src.config.emotion_config import global_emo_list
 emo_list = global_emo_list

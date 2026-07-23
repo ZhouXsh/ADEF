@@ -93,32 +93,16 @@ class EmoLevelDataset(BaseEmoLevelDataset):
                 ) / (self.template_dict['std_exp'] + self.eps)
                 pose_data = np.concatenate(
                     (
-                        (frame['scale'].flatten() - self.template_dict['min_scale'])
-                        / (
-                            self.template_dict['max_scale']
-                            - self.template_dict['min_scale']
-                            + self.eps
-                        ),
-                        (frame['t'].flatten() - self.template_dict['min_t'])
-                        / (self.template_dict['max_t'] - self.template_dict['min_t'] + self.eps),
-                        (frame['pitch'].flatten() - self.template_dict['min_pitch'])
-                        / (
-                            self.template_dict['max_pitch']
-                            - self.template_dict['min_pitch']
-                            + self.eps
-                        ),
-                        (frame['yaw'].flatten() - self.template_dict['min_yaw'])
-                        / (
-                            self.template_dict['max_yaw']
-                            - self.template_dict['min_yaw']
-                            + self.eps
-                        ),
-                        (frame['roll'].flatten() - self.template_dict['min_roll'])
-                        / (
-                            self.template_dict['max_roll']
-                            - self.template_dict['min_roll']
-                            + self.eps
-                        ),
+                        (frame['scale'].flatten() - self.template_dict['mean_scale'])
+                        / (self.template_dict['std_scale'] + self.eps),
+                        (frame['t'].flatten() - self.template_dict['mean_t'])
+                        / (self.template_dict['std_t'] + self.eps),
+                        (frame['pitch'].flatten() - self.template_dict['mean_pitch'])
+                        / (self.template_dict['std_pitch'] + self.eps),
+                        (frame['yaw'].flatten() - self.template_dict['mean_yaw'])
+                        / (self.template_dict['std_yaw'] + self.eps),
+                        (frame['roll'].flatten() - self.template_dict['mean_roll'])
+                        / (self.template_dict['std_roll'] + self.eps),
                     )
                 )
                 coef_dict['exp'].append(normalized_exp)

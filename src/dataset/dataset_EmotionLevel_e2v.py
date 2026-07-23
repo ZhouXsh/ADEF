@@ -245,16 +245,16 @@ class EmoLevelE2VDataset(data.Dataset):
                     elif coef_key == 'pose':
                         if self.normalize_type == 'mix':
                             pose_data = np.concatenate((
-                                (motion_data['motion'][frame_idx]['scale'].flatten() - template_dict['min_scale']) /
-                                (template_dict['max_scale'] - template_dict['min_scale'] + self.eps),
-                                (motion_data['motion'][frame_idx]['t'].flatten() - template_dict['min_t']) /
-                                (template_dict['max_t'] - template_dict['min_t'] + self.eps),
-                                (motion_data['motion'][frame_idx]['pitch'].flatten() - template_dict['min_pitch']) /
-                                (template_dict['max_pitch'] - template_dict['min_pitch'] + self.eps),
-                                (motion_data['motion'][frame_idx]['yaw'].flatten() - template_dict['min_yaw']) /
-                                (template_dict['max_yaw'] - template_dict['min_yaw'] + self.eps),
-                                (motion_data['motion'][frame_idx]['roll'].flatten() - template_dict['min_roll']) /
-                                (template_dict['max_roll'] - template_dict['min_roll'] + self.eps),
+                                (motion_data['motion'][frame_idx]['scale'].flatten() - template_dict['mean_scale']) /
+                                (template_dict['std_scale'] + self.eps),
+                                (motion_data['motion'][frame_idx]['t'].flatten() - template_dict['mean_t']) /
+                                (template_dict['std_t'] + self.eps),
+                                (motion_data['motion'][frame_idx]['pitch'].flatten() - template_dict['mean_pitch']) /
+                                (template_dict['std_pitch'] + self.eps),
+                                (motion_data['motion'][frame_idx]['yaw'].flatten() - template_dict['mean_yaw']) /
+                                (template_dict['std_yaw'] + self.eps),
+                                (motion_data['motion'][frame_idx]['roll'].flatten() - template_dict['mean_roll']) /
+                                (template_dict['std_roll'] + self.eps),
                             ))
                         else:
                             raise RuntimeError('pose data error')

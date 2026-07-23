@@ -75,10 +75,8 @@ def main():
     inference_cfg = partial_fields(InferenceConfig, args.__dict__)
     crop_cfg = partial_fields(CropConfig, args.__dict__)
 
-    from src.ADEF_pipeline_framelevel_0721 import (
-        ADEFPipelineFrameLevel0721,
-    )
-    pipeline = ADEFPipelineFrameLevel0721(
+    from src.ADEF_pipeline_framelevel_0721 import ADEFPipeline
+    pipeline = ADEFPipeline(
         inference_cfg=inference_cfg,
         crop_cfg=crop_cfg,
     )

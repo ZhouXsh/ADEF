@@ -249,16 +249,16 @@ class GenericTalkingMotionDataset(data.Dataset):
         required = {
             "mean_exp",
             "std_exp",
-            "min_scale",
-            "max_scale",
-            "min_t",
-            "max_t",
-            "min_pitch",
-            "max_pitch",
-            "min_yaw",
-            "max_yaw",
-            "min_roll",
-            "max_roll",
+            "mean_scale",
+            "std_scale",
+            "mean_t",
+            "std_t",
+            "mean_pitch",
+            "std_pitch",
+            "mean_yaw",
+            "std_yaw",
+            "mean_roll",
+            "std_roll",
         }
         missing = required.difference(template.keys())
         if missing:
@@ -537,20 +537,20 @@ class GenericTalkingMotionDataset(data.Dataset):
             ) / (template["std_exp"] + self.eps)
             pose = np.concatenate([
                 (np.asarray(frame["scale"]).reshape(-1)
-                 - template["min_scale"])
-                / (template["max_scale"] - template["min_scale"] + self.eps),
+                 - template["mean_scale"])
+                / (template["std_scale"] + self.eps),
                 (np.asarray(frame["t"]).reshape(-1)
-                 - template["min_t"])
-                / (template["max_t"] - template["min_t"] + self.eps),
+                 - template["mean_t"])
+                / (template["std_t"] + self.eps),
                 (np.asarray(frame["pitch"]).reshape(-1)
-                 - template["min_pitch"])
-                / (template["max_pitch"] - template["min_pitch"] + self.eps),
+                 - template["mean_pitch"])
+                / (template["std_pitch"] + self.eps),
                 (np.asarray(frame["yaw"]).reshape(-1)
-                 - template["min_yaw"])
-                / (template["max_yaw"] - template["min_yaw"] + self.eps),
+                 - template["mean_yaw"])
+                / (template["std_yaw"] + self.eps),
                 (np.asarray(frame["roll"]).reshape(-1)
-                 - template["min_roll"])
-                / (template["max_roll"] - template["min_roll"] + self.eps),
+                 - template["mean_roll"])
+                / (template["std_roll"] + self.eps),
             ])
             expressions.append(expression.astype(np.float32))
             poses.append(pose.astype(np.float32))

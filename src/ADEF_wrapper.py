@@ -450,13 +450,13 @@ class ADEFWrapper(object):
         motion_list = []              # 运动列表
         Emotion_template_dict = self.template_dict
         for idx in track(range(motion_coef.shape[0]), description='🚀Generating Motion Sequence...', total=motion_coef.shape[0]):    # 总帧数
-            # 按照模板字典中的标准差和均值进行反归一化（从 0~1 到各自的范围）
+            # 按照模板字典中的标准差和均值进行反归一化（与 exp 一致：正态分布归一化的逆变换）
             exp = motion_coef[idx][:63].cpu() * Emotion_template_dict["std_exp"] + Emotion_template_dict["mean_exp"]    # [63]
-            scale = motion_coef[idx][63:64].cpu() * (Emotion_template_dict["max_scale"] - Emotion_template_dict["min_scale"]) + Emotion_template_dict["min_scale"]   # [1]
-            t = motion_coef[idx][64:67].cpu() * (Emotion_template_dict["max_t"] - Emotion_template_dict["min_t"]) + Emotion_template_dict["min_t"]    # [3]
-            pitch = motion_coef[idx][67:68].cpu() * (Emotion_template_dict["max_pitch"] - Emotion_template_dict["min_pitch"]) + Emotion_template_dict["min_pitch"]   # [1]
-            yaw = motion_coef[idx][68:69].cpu() * (Emotion_template_dict["max_yaw"] - Emotion_template_dict["min_yaw"]) + Emotion_template_dict["min_yaw"]   # [1]
-            roll = motion_coef[idx][69:70].cpu() * (Emotion_template_dict["max_roll"] - Emotion_template_dict["min_roll"]) + Emotion_template_dict["min_roll"]   # [1]
+            scale = motion_coef[idx][63:64].cpu() * Emotion_template_dict["std_scale"] + Emotion_template_dict["mean_scale"]   # [1]
+            t = motion_coef[idx][64:67].cpu() * Emotion_template_dict["std_t"] + Emotion_template_dict["mean_t"]    # [3]
+            pitch = motion_coef[idx][67:68].cpu() * Emotion_template_dict["std_pitch"] + Emotion_template_dict["mean_pitch"]   # [1]
+            yaw = motion_coef[idx][68:69].cpu() * Emotion_template_dict["std_yaw"] + Emotion_template_dict["mean_yaw"]   # [1]
+            roll = motion_coef[idx][69:70].cpu() * Emotion_template_dict["std_roll"] + Emotion_template_dict["mean_roll"]   # [1]
 
             R = get_rotation_matrix(pitch, yaw, roll)                    # 旋转矩阵
             R = R.reshape(1, 3, 3).cpu().numpy().astype(np.float32)           # (1, 3, 3)     1代表只有一张图片    3*3的旋转矩阵

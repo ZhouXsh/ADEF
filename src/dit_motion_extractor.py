@@ -143,13 +143,13 @@ class DiTMotionExtractor(object):
         motion_coef = motion_coef.squeeze() #.cpu().numpy().astype(np.float32)     # 去除张量中所有尺寸为1的维度。(n_frames, n_features=70)
         motion_list = []              # 运动列表
         for idx in track(range(motion_coef.shape[0]), description='🚀Generating Motion Sequence...', total=motion_coef.shape[0]):    # 总帧数
-            # 按照模板字典中的标准差和均值进行反归一化（从 0~1 到各自的范围）
+            # 按照模板字典中的标准差和均值进行反归一化（与 exp 一致：正态分布归一化的逆变换）
             exp = motion_coef[idx][:63].cpu() * self.templete_dict["std_exp"] + self.templete_dict["mean_exp"]    # [63]
-            scale = motion_coef[idx][63:64].cpu() * (self.templete_dict["max_scale"] - self.templete_dict["min_scale"]) + self.templete_dict["min_scale"]   # [1]
-            t = motion_coef[idx][64:67].cpu() * (self.templete_dict["max_t"] - self.templete_dict["min_t"]) + self.templete_dict["min_t"]    # [3]
-            pitch = motion_coef[idx][67:68].cpu() * (self.templete_dict["max_pitch"] - self.templete_dict["min_pitch"]) + self.templete_dict["min_pitch"]   # [1]
-            yaw = motion_coef[idx][68:69].cpu() * (self.templete_dict["max_yaw"] - self.templete_dict["min_yaw"]) + self.templete_dict["min_yaw"]   # [1]
-            roll = motion_coef[idx][69:70].cpu() * (self.templete_dict["max_roll"] - self.templete_dict["min_roll"]) + self.templete_dict["min_roll"]   # [1]
+            scale = motion_coef[idx][63:64].cpu() * self.templete_dict["std_scale"] + self.templete_dict["mean_scale"]   # [1]
+            t = motion_coef[idx][64:67].cpu() * self.templete_dict["std_t"] + self.templete_dict["mean_t"]    # [3]
+            pitch = motion_coef[idx][67:68].cpu() * self.templete_dict["std_pitch"] + self.templete_dict["mean_pitch"]   # [1]
+            yaw = motion_coef[idx][68:69].cpu() * self.templete_dict["std_yaw"] + self.templete_dict["mean_yaw"]   # [1]
+            roll = motion_coef[idx][69:70].cpu() * self.templete_dict["std_roll"] + self.templete_dict["mean_roll"]   # [1]
 
             R = get_rotation_matrix(pitch, yaw, roll)                    # 旋转矩阵
             R = R.reshape(1, 3, 3).cpu().numpy().astype(np.float32)           # (1, 3, 3)     1代表只有一张图片    3*3的旋转矩阵
