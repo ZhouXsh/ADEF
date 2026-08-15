@@ -147,8 +147,8 @@ class DiTDecoder(nn.Module):
 class DenoisingNetwork(nn.Module):
     def __init__(self, device='cuda', motion_feat_dim=70,
                  use_indicator=None, architecture="decoder", feature_dim=512, n_heads=8,
-                 n_layers=8, mlp_ratio=4, align_mask_width=1, no_use_learnable_pe=True, n_prev_motions=25,
-                 n_motions=100, n_diff_steps=500):
+                 n_layers=8, mlp_ratio=4, align_mask_width=1, no_use_learnable_pe=True, n_prev_motions=16,
+                 n_motions=64, n_diff_steps=500):
         super().__init__()
         # Model parameters
         self.motion_feat_dim = motion_feat_dim
@@ -260,7 +260,7 @@ class DitTalkingHead(nn.Module):
     """
 
     def __init__(self, device='cuda', target="sample", architecture="decoder",
-                 motion_feat_dim=70, fps=25, n_motions=100, n_prev_motions=25,
+                 motion_feat_dim=70, fps=25, n_motions=64, n_prev_motions=16,
                  audio_model="hubert", feature_dim=512, n_diff_steps=500,
                  diff_schedule="cosine", cfg_mode="incremental",
                  guiding_conditions="audio,emotion", emo_classes=8,
@@ -724,8 +724,8 @@ __all__ = ['DiffusionSchedule', 'DenoisingNetwork', 'DiTDecoderLayer', 'DiTDecod
 if __name__ == "__main__":
     device = "cuda"
     motion_feat_dim = 70
-    n_motions = 100
-    n_prev_motions = 25
+    n_motions = 64
+    n_prev_motions = 16
 
     L_audio = int(16000 * n_motions / 25)
     d_audio = 768
