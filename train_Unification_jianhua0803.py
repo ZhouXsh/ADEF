@@ -47,17 +47,17 @@ from src.dataset.dataset_EmotionLevel_clear_jianhua0803 import EmoLevelDataset
 # -----------20260806-------------------
 
 # 这个效果不错，复刻一下
-# batch_size:  64
+# batch_size:  128
 # iter:  300000
 # warm:  20000   decay:200000
 # l_exp  0.1 to 1.0
 # mask： 2
 from src.modules.emotion_dit_Unification_jianhua0803 import DitTalkingHead
-g_exp_name = "20260813_fuke_20260806_emotion_dit_Unification_bs64_lexp1"
-device_id = 5
+g_exp_name = "20260815_fuke_20260806_emotion_dit_Unification_bs128_lexp1"
+device_id = 1
 
 # 这个效果不错
-# # batch_size:  64
+# # batch_size:  128
 # # iter:  200000
 ## l_exp  0.1 to 1.0
 # from src.modules.emotion_dit_Unification_jianhua0803 import DitTalkingHead
@@ -547,7 +547,7 @@ if __name__ == '__main__':
     parser.add_argument('--data_root', type=Path, default="src/my_prepare/",)
     parser.add_argument('--motion_filename', type=str, default='front_all_motions.pkl')             # templates
     parser.add_argument('--motion_template_filename', type=str, default='motion_template.pkl')     # motion_template
-    parser.add_argument('--batch_size', type=int, default=64, help='batch size')
+    parser.add_argument('--batch_size', type=int, default=128, help='batch size')
     parser.add_argument('--num_workers', type=int, default=4, help='number of workers for dataloader')
     parser.add_argument('--crop_strategy', type=str, default="random")
     parser.add_argument('--normalize_type', type=str, default="mix", choices=["std", "case", "scale", "minmax", "mix"])

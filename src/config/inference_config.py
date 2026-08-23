@@ -24,7 +24,7 @@ class InferenceConfig(PrintableConfig):
     # MOTION SEQUENCE GENERATOR           运动序列生成器（音频toMotion） 相关权重
     
     # checkpoint_MotionGenerator: str = make_abs_path("../../pretrained_weights/ADEF/motion_generator/emo_dit_100000.pt")
-    checkpoint_MotionGenerator: str = make_abs_path("../../experiments/emo_dit/20260720_emotion_dit_Unification/checkpoints/iter_0100000.pt")
+    checkpoint_MotionGenerator: str = make_abs_path("../../experiments/emo_dit/20260815_fuke_20260806_emotion_dit_Unification_bs128_lexp1/checkpoints/iter_0200000.pt")
     checkpoint_AudioEncoder: str = make_abs_path("../../pretrained_weights/hubert-base-ls960/")
     motion_template_path: str = make_abs_path("../../pretrained_weights/ADEF/motion_template/motion_template.pkl")  # emotion_template
 

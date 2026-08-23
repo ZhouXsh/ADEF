@@ -20,7 +20,9 @@ from ..modules.motion_extractor import MotionExtractor
 from ..modules.appearance_feature_extractor import AppearanceFeatureExtractor
 from ..modules.stitching_retargeting_network import StitchingRetargetingNetwork
 
-from ..modules.emotion_dit_Unification import DitTalkingHead  # norm版本
+# from ..modules.emotion_dit_Unification_ditcond0819 import DitTalkingHead  # norm版本
+from ..modules.emotion_dit_Unification_jianhua0803 import DitTalkingHead  # norm版本
+
 
 class NullableArgs:
     def __init__(self, namespace):
