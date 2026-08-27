@@ -35,7 +35,8 @@ def _resolve_motion_architecture(model_args):
     n_layers = int(_arg(model_args, "n_layers", 8))
     n_heads = int(_arg(model_args, "n_heads", 10 if feature_dim == 640 else 8))
     mlp_ratio = int(_arg(model_args, "mlp_ratio", 4))
-    is_new = bool(_arg(model_args, "model_params_propagated", False))
+    has_recorded_module = getattr(model_args, "model_module", None) is not None
+    is_new = bool(_arg(model_args, "model_params_propagated", False)) or has_recorded_module
 
     if is_new:
         use_indicator = bool(_arg(model_args, "use_indicator", True))
