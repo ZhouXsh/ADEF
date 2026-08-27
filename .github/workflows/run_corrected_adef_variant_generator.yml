@@ -1,0 +1,97 @@
+name: Run corrected ADEF variant generator
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - .github/workflows/run_corrected_adef_variant_generator.yml
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    if: contains(github.event.head_commit.message, '[run-variant-generator]')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout develop
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Extract, correct, and execute generator
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          import textwrap
+
+          workflow_path = Path('.github/workflows/generate_adef_optimization_variants.yml')
+          raw = workflow_path.read_text(encoding='utf-8').splitlines(keepends=True)
+          start = next(i for i, line in enumerate(raw) if line.strip() == "python - <<'PY'") + 1
+          end = next(i for i in range(start, len(raw)) if raw[i].strip() == 'PY')
+          source = textwrap.dedent(''.join(raw[start:end]))
+
+          bad = re.compile(
+              r"\n\s*if '_legacy' in content or 'import emotion_dit_Unification_jianhua0803' in content:\n"
+              r"\s*raise RuntimeError\(f'\{path\} unexpectedly imports a sample implementation\.'\)"
+          )
+          replacement = """
+              forbidden_imports = (
+                  'from . import emotion_dit_Unification_jianhua0803_legacy',
+                  'from .emotion_dit_Unification_jianhua0803 import',
+                  'DitTalkingHead as _BaseDitTalkingHead',
+              )
+              if any(token in content for token in forbidden_imports):
+                  raise RuntimeError(f'{path} unexpectedly imports a sample implementation.')"""
+          source, count = bad.subn('\n' + textwrap.dedent(replacement).rstrip(), source, count=1)
+          if count != 1:
+              raise RuntimeError(f'Could not correct generator validation block: matches={count}')
+
+          namespace = {'__name__': '__main__'}
+          exec(compile(source, '<corrected-variant-generator>', 'exec'), namespace, namespace)
+          PY
+
+      - name: Static syntax verification
+        shell: bash
+        run: |
+          python -m py_compile \
+            src/modules/emotion_dit_Unification_jianhua0803_lipaware.py \
+            src/modules/emotion_dit_Unification_jianhua0803_audio_pyramid.py \
+            src/modules/emotion_dit_Unification_jianhua0803_channelgate.py \
+            src/modules/emotion_dit_Unification_jianhua0803_vpred.py \
+            train_Unification_jianhua0803_lipaware.py \
+            train_Unification_jianhua0803_audio_pyramid.py \
+            train_Unification_jianhua0803_channelgate.py \
+            train_Unification_jianhua0803_vpred.py
+
+      - name: Commit generated variants to develop
+        shell: bash
+        run: |
+          rm -f \
+            .github/workflows/generate_adef_optimization_variants.yml \
+            .github/workflows/run_corrected_adef_variant_generator.yml
+          git config user.name "ADEF Variant Generator"
+          git config user.email "actions@users.noreply.github.com"
+          git add -- \
+            src/modules/emotion_dit_Unification_jianhua0803_lipaware.py \
+            src/modules/emotion_dit_Unification_jianhua0803_audio_pyramid.py \
+            src/modules/emotion_dit_Unification_jianhua0803_channelgate.py \
+            src/modules/emotion_dit_Unification_jianhua0803_vpred.py \
+            train_Unification_jianhua0803_lipaware.py \
+            train_Unification_jianhua0803_audio_pyramid.py \
+            train_Unification_jianhua0803_channelgate.py \
+            train_Unification_jianhua0803_vpred.py \
+            docs/MODEL_TRAINING_OPTIMIZATION_VARIANTS.md
+          git add -u -- \
+            .github/workflows/generate_adef_optimization_variants.yml \
+            .github/workflows/run_corrected_adef_variant_generator.yml
+          git commit -m "add full-copy model and training optimization variants [skip ci]"
+          git push origin HEAD:develop
