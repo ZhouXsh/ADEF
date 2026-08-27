@@ -1,4 +1,4 @@
-name: Run corrected ADEF variant generator
+name: Run checked ADEF variant generator
 
 on:
   push:
@@ -25,93 +25,47 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Extract, correct, and execute generator
+      - name: Verify and run full-copy generator
         shell: bash
         run: |
-          python - <<'PY'
-          from pathlib import Path
+          python -m py_compile scripts/generate_adef_model_training_variants.py
+          python scripts/generate_adef_model_training_variants.py
 
-          workflow_path = Path('.github/workflows/generate_adef_optimization_variants.yml')
-          raw = workflow_path.read_text(encoding='utf-8').splitlines(keepends=True)
-          start = next(i for i, line in enumerate(raw) if line.strip() == "python - <<'PY'") + 1
-          end = next(i for i in range(start, len(raw)) if raw[i].strip() == 'PY')
-
-          first_nonempty = next(line for line in raw[start:end] if line.strip())
-          indent = len(first_nonempty) - len(first_nonempty.lstrip())
-          source_lines = []
-          for line in raw[start:end]:
-              if not line.strip():
-                  source_lines.append('\n')
-                  continue
-              current_indent = len(line) - len(line.lstrip())
-              if current_indent >= indent:
-                  source_lines.append(line[indent:])
-              else:
-                  source_lines.append(line)
-          source = ''.join(source_lines)
-
-          lines = source.splitlines(keepends=True)
-          match_indices = [
-              index for index, line in enumerate(lines)
-              if "if '_legacy' in content or 'import emotion_dit_Unification_jianhua0803' in content:" in line
-          ]
-          if len(match_indices) != 1:
-              raise RuntimeError(
-                  f'Could not locate generator validation block: matches={len(match_indices)}'
-              )
-          index = match_indices[0]
-          if index + 1 >= len(lines) or 'unexpectedly imports a sample implementation' not in lines[index + 1]:
-              raise RuntimeError('Generator validation raise line was not found.')
-          line_indent = lines[index][:len(lines[index]) - len(lines[index].lstrip())]
-          replacement = [
-              line_indent + "forbidden_imports = (\n",
-              line_indent + "    'from . import emotion_dit_Unification_jianhua0803_legacy',\n",
-              line_indent + "    'from .emotion_dit_Unification_jianhua0803 import',\n",
-              line_indent + "    'DitTalkingHead as _BaseDitTalkingHead',\n",
-              line_indent + ")\n",
-              line_indent + "if any(token in content for token in forbidden_imports):\n",
-              line_indent + "    raise RuntimeError(f'{path} unexpectedly imports a sample implementation.')\n",
-          ]
-          lines[index:index + 2] = replacement
-          source = ''.join(lines)
-
-          namespace = {'__name__': '__main__'}
-          exec(compile(source, '<corrected-variant-generator>', 'exec'), namespace, namespace)
-          PY
-
-      - name: Static syntax verification
+      - name: Verify generated Python files
         shell: bash
         run: |
           python -m py_compile \
             src/modules/emotion_dit_Unification_jianhua0803_lipaware.py \
             src/modules/emotion_dit_Unification_jianhua0803_audio_pyramid.py \
             src/modules/emotion_dit_Unification_jianhua0803_channelgate.py \
-            src/modules/emotion_dit_Unification_jianhua0803_vpred.py \
+            src/modules/emotion_dit_Unification_jianhua0803_minsnr_ema.py \
             train_Unification_jianhua0803_lipaware.py \
             train_Unification_jianhua0803_audio_pyramid.py \
             train_Unification_jianhua0803_channelgate.py \
-            train_Unification_jianhua0803_vpred.py
+            train_Unification_jianhua0803_minsnr_ema.py
 
       - name: Commit generated variants to develop
         shell: bash
         run: |
           rm -f \
             .github/workflows/generate_adef_optimization_variants.yml \
-            .github/workflows/run_corrected_adef_variant_generator.yml
+            .github/workflows/run_corrected_adef_variant_generator.yml \
+            scripts/generate_adef_model_training_variants.py
           git config user.name "ADEF Variant Generator"
           git config user.email "actions@users.noreply.github.com"
           git add -- \
             src/modules/emotion_dit_Unification_jianhua0803_lipaware.py \
             src/modules/emotion_dit_Unification_jianhua0803_audio_pyramid.py \
             src/modules/emotion_dit_Unification_jianhua0803_channelgate.py \
-            src/modules/emotion_dit_Unification_jianhua0803_vpred.py \
+            src/modules/emotion_dit_Unification_jianhua0803_minsnr_ema.py \
             train_Unification_jianhua0803_lipaware.py \
             train_Unification_jianhua0803_audio_pyramid.py \
             train_Unification_jianhua0803_channelgate.py \
-            train_Unification_jianhua0803_vpred.py \
+            train_Unification_jianhua0803_minsnr_ema.py \
             docs/MODEL_TRAINING_OPTIMIZATION_VARIANTS.md
           git add -u -- \
             .github/workflows/generate_adef_optimization_variants.yml \
-            .github/workflows/run_corrected_adef_variant_generator.yml
+            .github/workflows/run_corrected_adef_variant_generator.yml \
+            scripts/generate_adef_model_training_variants.py
           git commit -m "add full-copy model and training optimization variants [skip ci]"
           git push origin HEAD:develop
