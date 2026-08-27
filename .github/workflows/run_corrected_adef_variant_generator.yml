@@ -28,6 +28,17 @@ jobs:
       - name: Verify and run full-copy generator
         shell: bash
         run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('scripts/generate_adef_model_training_variants.py')
+          text = path.read_text(encoding='utf-8')
+          old = '    """Frame-preserving multi-scale temporal refinement for speech features."""'
+          new = '    # Frame-preserving multi-scale temporal refinement for speech features.'
+          if text.count(old) != 1:
+              raise RuntimeError(f'Expected one nested docstring, found {text.count(old)}')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
           python -m py_compile scripts/generate_adef_model_training_variants.py
           python scripts/generate_adef_model_training_variants.py
 
