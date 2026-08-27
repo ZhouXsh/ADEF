@@ -94,7 +94,7 @@ def process_videos(video_list):
 
 
 if __name__ == "__main__":
-    root_dir = "/home/zhouxishi/VirtualMan_proj/dataset/MEAD11/videos"
+    root_dir = "/home/Zhouxishi/VirtualMan_proj/dataset/MEAD11/videos"
 
     video_names = sorted([
         os.path.join(root, file)

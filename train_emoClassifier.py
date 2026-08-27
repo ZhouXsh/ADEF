@@ -25,7 +25,7 @@ emo_label = ['ang',  'con',  'dis',  'fea',  'hap',  'neu',  'sad',  'sur']
 def accuracy(preds, labels):
     return (preds.argmax(dim=1) == labels).float().mean().item()
 
-def train(devices=1):
+def train(devices=7):
     # 训练超参数
     num_epochs = 50000
     learning_rate = 1e-4
@@ -113,15 +113,16 @@ def train(devices=1):
             print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {total_loss.item():.6f}, ACC: {acc_emo:.6f} + {acc_level:.6f}")
 
     # print("训练完成！")
-    save_dir = f"{log_dir}/ckpt.pth"
+    save_dir = f"{log_dir}/ckpt_n64.pth"
     torch.save(model.state_dict(), save_dir)
 
 # 评估
 @torch.no_grad()
 def eval():
-    device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:7" if torch.cuda.is_available() else "cpu")
     transf_model = EmotionTransformer().to(device)
-    transf_model.load_state_dict(torch.load('pretrained_weights/ADEF/emo_classifier/emo_level_classifier.pth'))
+    # transf_model.load_state_dict(torch.load('pretrained_weights/ADEF/emo_classifier/emo_level_classifier.pth'))
+    transf_model.load_state_dict(torch.load('experiments/emo_classifier/ckpt_n64.pth'))
     transf_model.eval()
 
     eval_dataset = Motion2Emo_Dataset()
@@ -144,5 +145,5 @@ def eval():
     return None
 
 if __name__ == '__main__':
-    train()
-    # eval()
+    # train()
+    eval()

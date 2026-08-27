@@ -171,9 +171,11 @@ cython_debug/
 /assets/
 /eval/
 
+/tmp/
+
 src/my_prepare/*.pkl
 # src/my_prepare/*.txt
-
+src/data_processing
 *-bak.py
 
 generate.py

@@ -16,7 +16,7 @@ sys.path.append(os.path.dirname(os.path.abspath("../")))   # src目录
 from src.config.argument_config import ArgumentConfig
 from src.motion_extractor import make_motion_template
 
-video_dataset_root = "/home/zhouxishi/VirtualMan_proj/dataset/MEAD11/videos"
+video_dataset_root = "/home/Zhouxishi/VirtualMan_proj/dataset/MEAD11/videos"
 
 # ============================================
 # 01_extract_motions - 从视频中提取运动模板

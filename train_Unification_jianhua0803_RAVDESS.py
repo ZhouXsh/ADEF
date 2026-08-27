@@ -1,4 +1,9 @@
-# 在毕设的基础上改动
+# 全力冲刺Unification
+# n_diff_steps 50 to 500
+# align_mask_width 1 to 2
+# iter至少是200000，尽管增大bs
+# warm 采用 10%是对的
+# 可以：l_exp  0.1 to 1.0
 
 import argparse
 from collections import deque, defaultdict
@@ -17,63 +22,17 @@ from torch.utils import data
 from src.modules.emotion_level_classifier import EmotionTransformer as Classifier
 import src.utils as utils
 from src.dataset import infinite_data_loader
-from src.dataset.dataset_EmotionLevel import EmoLevelDataset
+from src.dataset.dataset_EmotionLevel_clear_jianhua0803 import EmoLevelDataset
 
-# from src.modules.emotion_dit_chatgpt import DitTalkingHead
-# g_exp_name = '20260616_emotion_dit_chatgpt' 
-# device_id = 1  # 选择 GPU
+# batch_size:  128
+# iter:  300000
+# warm:  20000   decay:200000
+# l_exp  0.1 to 1.0
+# mask： 2
+from src.modules.emotion_dit_Unification_jianhua0803 import DitTalkingHead
+g_exp_name = "20260818_emotion_dit_Unification_bs128_lexp1_RAVDESS"
+device_id = 1
 
-# from src.modules.emotion_dit_prev_modi import DitTalkingHead
-# g_exp_name = '20260630毕设去掉两层调制_修改train错误的loss累积_prev_modi' 
-# device_id = 3  # 选择 GPU
-
-# from src.modules.emotion_dit import DitTalkingHead
-# g_exp_name = '20260630毕设去掉两层调制_修改train错误的loss累积' 
-# device_id = 7  # 选择 GPU
-
-# from src.modules.emotion_dit_myfinalv1 import DitTalkingHead
-# g_exp_name = "20260712_emotion_dit_myfinalv1"
-# device_id = 1
-
-# from src.modules.emotion_dit_timestep_0714 import DitTalkingHead
-# g_exp_name = "20260714_emotion_dit_timestep_0714"
-# device_id = 2
-
-# from src.modules.emotion_dit_youhua_0714 import DitTalkingHead
-# g_exp_name = "20260714_emotion_dit_youhua_0714"
-# device_id = 3
-
-# from src.modules.emotion_dit_youhua_0715 import DitTalkingHead
-# g_exp_name = "20260715_emotion_dit_youhua_0715"
-# device_id = 1
-
-# from src.modules.emotion_dit import DitTalkingHead
-# g_exp_name = "20260717_emotion_dit_500stepDiffusion"
-# device_id = 1
-
-# from src.modules.emotion_dit_SingleCFG_0717 import DitTalkingHead
-# g_exp_name = "20260717_emotion_dit_SingleCFG_0717"
-# device_id = 2
-
-# from src.modules.emotion_dit_SingleCFG_0717_youhua import DitTalkingHead
-# g_exp_name = "20260717_emotion_dit_SingleCFG_0717_youhua"
-# device_id = 3
-
-# from src.modules.emotion_dit_0717_2MotionDecoder import DitTalkingHead
-# g_exp_name = "20260717_emotion_dit_0717_2MotionDecoder"
-# device_id = 4
-
-from src.modules.emotion_dit_Unification import DitTalkingHead
-g_exp_name = "20260720_emotion_dit_Unification"
-device_id = 7
-
-# from src.modules.emotion_dit_Unification import DitTalkingHead
-# g_exp_name = "20260720_emotion_dit_Unification_width2"
-# device_id = 3
-
-# from src.modules.emotion_dit_Unification_noCFG_0721 import DitTalkingHead
-# g_exp_name = "20260721_emotion_dit_Unification_noCFG_0721"
-# device_id = 1
 
 torch.cuda.set_device(device_id)  # 设置默认 GPU
 device = torch.device(f"cuda:{device_id}" if torch.cuda.is_available() else "cpu")  # 显式指定设备
@@ -89,108 +48,90 @@ def train(args, model, train_loader, val_loader, optimizer, save_dir, scheduler=
     model.train()
 
     data_loader = infinite_data_loader(train_loader)   # 将数据加载器（train_loader）转换为一个无限循环的迭代器
-    audio_unit = train_loader.dataset.audio_unit       # 每一帧的样本数  self.audio_unit = 16000. / self.coef_fps
+    audio_unit = train_loader.dataset.audio_unit       # 每一帧的样本数  self.audio_unit = 16000. / self.coef_fps (float)
+    n_audio_samples = round(audio_unit * args.n_motions)         # current 段对应的音频采样数（int）
+    n_prev_audio_samples = round(audio_unit * args.n_prev_motions)  # prev 段对应的音频采样数（int）
     predict_head_pose = not args.no_head_pose          # False -> True  预测头部姿势
     loss_log = defaultdict(lambda: deque(maxlen=args.log_smooth_win))  # maxlen = 50
 
     optimizer.zero_grad()
-    for it in range(start_iter, args.max_iter + 1):   # 迭代次数  0 ~ 50000
-        audio_pair, coef_pair, emo_index, _ = next(data_loader)  # 音频(N=8, 100帧的采样数)*2 及其运动系数{'exp':[(8, 100, 63)],'pose':[(8, 100, 7)]} *2  
-        audio_pair = [audio.to(device) for audio in audio_pair]
-        coef_pair = [{x: coef_pair[i][x].to(device) for x in coef_pair[i]} for i in range(2)]  # 每一种系数（旋转、表情等）都放入device
-        motion_coef_pair = [  # 按照关键点的位置进行拼接。   (8, 100, 70) * 2     即 torch.cat([coef_dict['exp'], coef_dict['pose']], dim=-1) 
-            utils.get_motion_coef(coef_pair[i], args.rot_repr, predict_head_pose) for i in range(2)  # rot_repr= aa
-        ] 
+    for it in range(start_iter, args.max_iter + 1):   # 迭代次数  0 ~ max_iter
+        # 数据集一次采样 (n_prev_motions + n_motions) = 16 + 64 = 80 帧：
+        #   前 n_prev_motions=16 帧作为 prev，后 n_motions=64 帧作为 current。
+        audio, coef_dict, emo_index, _ = next(data_loader)
+        audio = audio.to(device)                                                 # (N, (n_prev + n_motions) * audio_unit)
+        coef_dict = {k: coef_dict[k].to(device) for k in coef_dict}              # {exp:(N,80,63), pose:(N,80,7)}
+        motion_coef_full = utils.get_motion_coef(
+            coef_dict, args.rot_repr, predict_head_pose
+        )                                                                        # (N, 80, 70) — 前 16 是 prev，后 64 是 current
         emo_index = emo_index.to(device)
+        batch_size = audio.shape[0]
 
-        # Extract audio features  提取音频特征
-        if args.use_context_audio_feat:   # False
-            # (N, L_audio) -> (N, L_audio = audio_unit * n_units + pad_threshold) -> (N, 2L=200, 768) -> (N, 768, L) ->  (N, L=100, feature_dim=512)
-            audio_feat = model.extract_audio_feature(torch.cat(audio_pair, dim=1), args.n_motions * 2)  # (N, 2L, :)
+        # 单数轮次 → 只用 current 64 帧训练"无先前参考"形式（模型用 start_*_feat 内部初始化 prev）
+        # 双数轮次 → 用 80 帧（16 prev + 64 current）训练"有先前参考"形式（传入 GT prev）
+        is_starting_sample = (it % 2 == 1)
 
-        loss_noise = 0                                    # 去噪损失
-        loss_emo = torch.tensor(0, device=device)         # 情感损失
-        loss_expression = torch.tensor(0, device=device)         # 表情变形损失
-        loss_exp_vel = torch.tensor(0, device=device)
-        loss_exp_smooth = torch.tensor(0, device=device)
-        loss_head_angle = torch.tensor(0, device=device)
-        loss_head_vel = torch.tensor(0, device=device)
-        loss_head_smooth = torch.tensor(0, device=device)
-        loss_head_trans = 0
-        for i in range(2):   # 前n_motions 和 后n_motions
-            audio = audio_pair[i]  # (N=8, L_a)           N：批次大小  L_a：100帧对应的音频长度（样本）
-            motion_coef = motion_coef_pair[i]  # (N=8, L=100, 50+x=70)   L：帧数    50+x：运动参数的总数
-            batch_size = audio.shape[0]  # N = 16 
+        # ---------- 截断逻辑（仅作用于 current 部分；prev 不截断） ----------
+        current_audio  = audio[:, -n_audio_samples:].contiguous()                 # (N, n_audio_samples)
+        current_motion = motion_coef_full[:, -args.n_motions:]                    # (N, n_motions, 70)
+        end_idx = None
+        trunc_prob = args.trunc_prob1 if is_starting_sample else args.trunc_prob2
+        if np.random.rand() < trunc_prob:
+            current_audio, current_motion, end_idx = utils.truncate_motion_coef_and_audio(
+                current_audio, current_motion, args.n_motions, audio_unit, args.pad_mode)
 
-            # truncate input audio and motion according to trunc_prob 根据trunc_prob截断输入音频和运动
-            # 随机截断 被截断部分填0            截断是为了适应不同长度的audio
-            if (i == 0 and np.random.rand() < args.trunc_prob1                # 0.3  第一个样本的截断概率
-                ) or (i != 0 and np.random.rand() < args.trunc_prob2):         # 0.4 第二个样本的截断概率
-                # 随机裁断并填充。返回裁断且填充0后的audio，motion_coef，裁断位置索引end_idx
-                audio_in, motion_coef_in, end_idx = utils.truncate_motion_coef_and_audio(   
-                    audio, motion_coef, args.n_motions, audio_unit, args.pad_mode)
-                if args.use_context_audio_feat and i != 0:   # False
-                    # use contextualized audio feature for the second clip  为第二个剪辑使用情境化音频功能
-                    audio_in = model.extract_audio_feature(torch.cat([audio_pair[i - 1], audio_in], dim=1),
-                                                           args.n_motions * 2)[:, -args.n_motions:]
-            else:  # 不截断
-                if args.use_context_audio_feat:   # False
-                    audio_in = audio_feat[:, i * args.n_motions:(i + 1) * args.n_motions]
-                else:
-                    audio_in = audio      # (N=8, L_a)   
-                motion_coef_in, end_idx = motion_coef, None       # motion_coef_in：(N=8, L=100, 系数个数=70)
+        # ---------- 指示器（指示 current 中被填充的帧） ----------
+        if args.use_indicator:
+            if end_idx is not None:                                                # 被截断
+                indicator = torch.arange(args.n_motions, device=device).expand(
+                    batch_size, -1) < end_idx.unsqueeze(1)                          # 超过 end_idx 的位置是 False
+            else:                                                                  # 没被截断
+                indicator = torch.ones(batch_size, args.n_motions, device=device)
+        else:
+            indicator = None
 
-            if args.use_indicator:  # True  使用指示器：用于指示哪些部分被截断了。
-                if end_idx is not None:    # 被截断
-                    indicator = torch.arange(args.n_motions, device=device).expand(batch_size, -1) < end_idx.unsqueeze(
-                        1)    # 生成一个 0, 1, 2, ..., args.n_motions-1 的一维 Tensor ； expand扩展为(batch_size, args.n_motions)
-                    # 与end_idx进行比较，索引超出end_idx的部分都是 False，说明这些部分被截断了.
-                else:
-                    indicator = torch.ones(batch_size, args.n_motions, device=device)   # (batch_size, args.n_motions)全1张量,没被截断
-            else:
-                indicator = None
+        # ---------- 模型前向：单数轮次不传 prev，双数轮次传 GT prev ----------
+        if is_starting_sample:
+            # 单数：prev_motion_feat=None、prev_audio_feat=None → 模型内部用 start_motion_feat / start_audio_feat
+            noise, target, _, _ = model(
+                current_motion, current_audio,
+                indicator=indicator, emo_index=emo_index,
+            )
+            prev_motion_for_loss = None
+        else:
+            # 双数：前 16 帧的真实 GT prev。
+            prev_motion_gt = motion_coef_full[:, :args.n_prev_motions]              # (N, n_prev_motions, 70)
+            prev_audio_raw = audio[:, :n_prev_audio_samples].contiguous()             # (N, n_prev_motions * audio_unit)
+            with torch.no_grad():
+                prev_audio_feat = model.extract_audio_feature(
+                    prev_audio_raw, frame_num=args.n_prev_motions
+                )                                                                   # (N, n_prev_motions, 512)
+            noise, target, _, _ = model(
+                current_motion, current_audio,
+                prev_motion_gt, prev_audio_feat,
+                indicator=indicator, emo_index=emo_index,
+            )
+            prev_motion_for_loss = prev_motion_gt
 
-            # Inference   使用DiT推理得到noise, target, prev_motion_coef, prev_audio_feat
-            if i == 0:    # 前n_motions，没有先前的特征
-                noise, target, prev_motion_coef, prev_audio_feat = model(motion_coef_in, audio_in, indicator=indicator, emo_index = emo_index)  #  (8, 100, 70) , (8, 125, 70) , (8, 100, 70) , (8, 100, 256)
-                if end_idx is not None:  # was truncated, needs to use the complete feature  被截断，需要使用完整功能
-                    prev_motion_coef = motion_coef[:, -args.n_prev_motions:]   #  (8, 25, 70)  选取前 n_prev_motions=25 帧作为 先前运动特征 
-                    if args.use_context_audio_feat:   # False
-                        # 前面已经提取过了audio_feat，直接截取部分即可
-                        prev_audio_feat = audio_feat[:, args.n_motions - args.n_prev_motions:args.n_motions].detach()
-                    else:
-                        with torch.no_grad():   # 音频->音频特征   并选取结果的 前 n_prev_motions=25 帧作为 先前音频特征
-                            prev_audio_feat = model.extract_audio_feature(audio)[:, -args.n_prev_motions:]  # (8 25 256)
-                else:   # 没被截断，直接使用预测结果的  前n_prev_motions=25 帧 作为参考
-                    prev_motion_coef = prev_motion_coef[:, -args.n_prev_motions:]   #  (8, 25, 70)
-                    prev_audio_feat = prev_audio_feat[:, -args.n_prev_motions:]     #  (8  25  256)
-            else:  #  后n_motions部分：使用前n_motions的特征作为先前特征
-                noise, target, _, _ = model(motion_coef_in, audio_in, prev_motion_coef, prev_audio_feat, indicator=indicator, emo_index = emo_index)
-                #  (8, 100, 70) , (8, 125, 70)
-            loss_n, loss_exp, loss_exp_v, loss_exp_s, loss_ha, loss_hc, loss_hs, loss_ht = utils.compute_loss_new(args, i == 0, motion_coef_in, noise, target, prev_motion_coef, end_idx)
+        # ---------- 损失 ----------
+        loss_n, loss_exp, loss_exp_v, loss_exp_s, loss_ha, loss_hc, loss_hs, loss_ht = utils.compute_loss_new(
+            args, is_starting_sample, current_motion, noise, target, prev_motion_for_loss, end_idx,
+        )
 
-            exps = target[:, args.n_prev_motions:, :63].clone()   # (N,100,63)    各自归一化的
+        # 情感分类损失：取 target 的后 64 帧（即去噪后的 current 段）的 exp 系数
+        exps = target[:, args.n_prev_motions:, :63].clone()                        # (N, n_motions, 63)
+        pred_emo, _ = classifier(exps)                                              # (N, 8)
+        loss_emo = cross_criterion(pred_emo, emo_index)                             # 不再除以 2（每 iter 仅一段）
 
-            # 情感分类（情感损失）
-            pred_emo, _ = classifier(exps)   # (N,100,63)  -> (N,8)
-            loss_e = cross_criterion(pred_emo, emo_index)
-            loss_emo = loss_emo + loss_e / 2
-
-            loss_noise = loss_noise + loss_n / 2        # 前n_motions和后n_motions各占一半，因此除以2。下同
-            loss_expression = loss_expression + loss_exp / 2
-            loss_exp_vel = loss_exp_vel + loss_exp_v / 2.
-            loss_exp_smooth = loss_exp_smooth + loss_exp_s / 2.
-            # 预测头部姿势，且有相应的权重和loss值
-            if args.target == 'sample' and predict_head_pose and args.l_head_angle > 0:
-                loss_head_angle = loss_head_angle + loss_ha / 2
-            if args.target == 'sample' and predict_head_pose and args.l_head_vel > 0 and loss_hc is not None:
-                loss_head_vel = loss_head_vel + loss_hc / 2
-            if args.target == 'sample' and predict_head_pose and args.l_head_smooth > 0 and loss_hs is not None:
-                loss_head_smooth = loss_head_smooth + loss_hs / 2
-            # 无需除以2，因为它只适用于第二个剪辑
-            if args.target == 'sample' and predict_head_pose and args.l_head_trans > 0 and loss_ht is not None:
-                # no need to divide by 2 because it only applies to the second clip
-                loss_head_trans = loss_head_trans + loss_ht
+        # 累加各项损失（每轮只用一 clip，所以无需 /2）
+        loss_noise     = loss_n
+        loss_expression = loss_exp
+        loss_exp_vel    = loss_exp_v
+        loss_exp_smooth = loss_exp_s
+        loss_head_angle = loss_ha if (args.target == 'sample' and predict_head_pose and args.l_head_angle > 0 and loss_ha is not None) else torch.tensor(0, device=device)
+        loss_head_vel   = loss_hc if (args.target == 'sample' and predict_head_pose and args.l_head_vel > 0 and loss_hc is not None) else torch.tensor(0, device=device)
+        loss_head_smooth = loss_hs if (args.target == 'sample' and predict_head_pose and args.l_head_smooth > 0 and loss_hs is not None) else torch.tensor(0, device=device)
+        loss_head_trans = loss_ht if (args.target == 'sample' and predict_head_pose and args.l_head_trans > 0 and loss_ht is not None) else torch.tensor(0, device=device)
 
         # 扩散（采样）损失
         loss_log['noise'].append(loss_noise.item())
@@ -283,9 +224,9 @@ def train(args, model, train_loader, val_loader, optimizer, save_dir, scheduler=
                 'iter': it,                    # 训练轮次
             }, save_dir / f'iter_{it:07}.pt')   
 
-        # validation  验证模型
-        if (it % args.val_iter == 0 or it == 0) or it == args.max_iter:  # 每50次迭代 验证一次。 第0次和第50000次 验证一次
-            val(args, model, val_loader, it, 1, 'val', writer, classifier)
+        # # validation  验证模型
+        # if (it % args.val_iter == 0 or it == 0) or it == args.max_iter:  # 每50次迭代 验证一次。 第0次和第50000次 验证一次
+        #     val(args, model, val_loader, it, 1, 'val', writer, classifier)
 
 # 测试部分
 @torch.no_grad()
@@ -296,104 +237,83 @@ def val(args, model, test_loader, current_iter, n_rounds=1, mode='val', writer=N
     model.eval()   # 设置为eval模式
 
     audio_unit = test_loader.dataset.audio_unit
+    n_audio_samples = round(audio_unit * args.n_motions)            # current 段对应的音频采样数（int）
+    n_prev_audio_samples = round(audio_unit * args.n_prev_motions)   # prev 段对应的音频采样数（int）
     predict_head_pose = not args.no_head_pose
 
     loss_log = defaultdict(list)
+    val_sample_counter = 0     # 局部计数器，使 val 也按"单数轮次无 prev / 双数轮次有 prev"交替
     for test_round in range(n_rounds):     # 1  只测试一次
-        # 后面的代码与训练部分基本一致。。
-        for audio_pair, coef_pair, emo_index, _ in test_loader:
-            audio_pair = [audio.to(device) for audio in audio_pair]
-            coef_pair = [{x: coef_pair[i][x].to(device) for x in coef_pair[i]} for i in range(2)]
-            motion_coef_pair = [
-                utils.get_motion_coef(coef_pair[i], args.rot_repr, predict_head_pose) for i in range(2)
-            ]  # (N, L, 50+x)
+        # 与训练部分逻辑保持一致：每个样本按 16+64=80 帧采样，单数轮次无 prev、双数轮次有 prev。
+        for audio, coef_dict, emo_index, _ in test_loader:
+            audio = audio.to(device)
+            coef_dict = {k: coef_dict[k].to(device) for k in coef_dict}
+            motion_coef_full = utils.get_motion_coef(
+                coef_dict, args.rot_repr, predict_head_pose
+            )                                                                # (N, 80, 70)
             emo_index = emo_index.to(device)
+            batch_size = audio.shape[0]
 
-            # Extract audio features
-            if args.use_context_audio_feat:   # False
-                audio_feat = model.extract_audio_feature(torch.cat(audio_pair, dim=1), args.n_motions * 2)  # (N, 2L, :)
+            is_starting_sample = (val_sample_counter % 2 == 1)
+            val_sample_counter += 1
 
-            loss_noise = 0
-            loss_emo = torch.tensor(0, device=device)
-            loss_expression = 0
-            loss_exp_vel = 0
-            loss_exp_smooth = 0
-            loss_head_angle = 0
-            loss_head_vel = torch.tensor(0, device=device)
-            loss_head_smooth = torch.tensor(0, device=device)
-            loss_head_trans = 0
-            for i in range(2):   # 前n_motions 和 后n_motions
-                audio = audio_pair[i]  # (N, L_a)
-                motion_coef = motion_coef_pair[i]  # (N, L, 50+x)
-                batch_size = audio.shape[0]
+            # current 段（最后 64 帧）
+            current_audio  = audio[:, -n_audio_samples:].contiguous()
+            current_motion = motion_coef_full[:, -args.n_motions:]
+            end_idx = None
+            trunc_prob = args.trunc_prob1 if is_starting_sample else args.trunc_prob2
+            if np.random.rand() < trunc_prob:
+                current_audio, current_motion, end_idx = utils.truncate_motion_coef_and_audio(
+                    current_audio, current_motion, args.n_motions, audio_unit, args.pad_mode)
 
-                # truncate input audio and motion according to trunc_prob
-                if (i == 0 and np.random.rand() < args.trunc_prob1) or (i != 0 and np.random.rand() < args.trunc_prob2):
-                    audio_in, motion_coef_in, end_idx = utils.truncate_motion_coef_and_audio(
-                        audio, motion_coef, args.n_motions, audio_unit, args.pad_mode)
-                    if args.use_context_audio_feat and i != 0:   # False
-                        # use contextualized audio feature for the second clip
-                        audio_in = model.extract_audio_feature(torch.cat([audio_pair[i - 1], audio_in], dim=1),
-                                                               args.n_motions * 2)[:, -args.n_motions:]
+            if args.use_indicator:
+                if end_idx is not None:
+                    indicator = torch.arange(args.n_motions, device=device).expand(
+                        batch_size, -1) < end_idx.unsqueeze(1)
                 else:
-                    if args.use_context_audio_feat:   # False
-                        audio_in = audio_feat[:, i * args.n_motions:(i + 1) * args.n_motions]
-                    else:
-                        audio_in = audio
-                    motion_coef_in, end_idx = motion_coef, None
+                    indicator = torch.ones(batch_size, args.n_motions, device=device)
+            else:
+                indicator = None
 
-                if args.use_indicator:
-                    if end_idx is not None:
-                        indicator = torch.arange(args.n_motions, device=device).expand(batch_size,
-                                                                                       -1) < end_idx.unsqueeze(1)
-                    else:
-                        indicator = torch.ones(batch_size, args.n_motions, device=device)
-                else:
-                    indicator = None
+            # 模型前向
+            if is_starting_sample:
+                noise, target, _, _ = model(
+                    current_motion, current_audio,
+                    indicator=indicator, emo_index=emo_index,
+                )
+                prev_motion_for_loss = None
+            else:
+                prev_motion_gt = motion_coef_full[:, :args.n_prev_motions]
+                prev_audio_raw = audio[:, :n_prev_audio_samples].contiguous()
+                with torch.no_grad():
+                    prev_audio_feat = model.extract_audio_feature(
+                        prev_audio_raw, frame_num=args.n_prev_motions
+                    )
+                noise, target, _, _ = model(
+                    current_motion, current_audio,
+                    prev_motion_gt, prev_audio_feat,
+                    indicator=indicator, emo_index=emo_index,
+                )
+                prev_motion_for_loss = prev_motion_gt
 
-                # Inference
-                if i == 0:
-                    noise, target, prev_motion_coef, prev_audio_feat = model(motion_coef_in, audio_in, indicator=indicator, emo_index=emo_index)
-                    if end_idx is not None:  # was truncated, needs to use the complete feature
-                        prev_motion_coef = motion_coef[:, -args.n_prev_motions:]
-                        if args.use_context_audio_feat:   # False
-                            prev_audio_feat = audio_feat[:, args.n_motions - args.n_prev_motions:args.n_motions]
-                        else:
-                            with torch.no_grad():
-                                prev_audio_feat = model.extract_audio_feature(audio)[:, -args.n_prev_motions:]
-                    else:
-                        prev_motion_coef = prev_motion_coef[:, -args.n_prev_motions:]
-                        prev_audio_feat = prev_audio_feat[:, -args.n_prev_motions:]
-                else:
-                    noise, target, _, _ = model(motion_coef_in, audio_in, prev_motion_coef, prev_audio_feat, indicator=indicator, emo_index=emo_index)
+            loss_n, loss_exp, loss_exp_v, loss_exp_s, loss_ha, loss_hc, loss_hs, loss_ht = utils.compute_loss_new(
+                args, is_starting_sample, current_motion, noise, target, prev_motion_for_loss, end_idx,
+            )
 
-                loss_n, loss_exp, loss_exp_v, loss_exp_s, loss_ha, loss_hc, loss_hs, loss_ht = utils.compute_loss_new(args, i == 0, motion_coef_in, noise, target, prev_motion_coef, end_idx)
+            # 情感分类（情感损失）
+            exps = target[:, args.n_prev_motions:, :63].clone()      # (N, n_motions, 63)
+            pred_emo, _ = classifier(exps)                            # (N, 8)
+            loss_emo = cross_criterion(pred_emo, emo_index)
 
-                exps = target[:, args.n_prev_motions:, :63].clone()   # (N,100,63)    各自归一化的
-
-                # 情感分类（情感损失）
-                pred_emo, _ = classifier(exps)   # (N,100,63)  -> (N,8)
-                loss_e = cross_criterion(pred_emo, emo_index)
-                loss_emo = loss_emo + loss_e / 2
-
-                # simple loss   简单损失：真实运动序列 和 生成的干净运动序列 之间的L2距离。
-                loss_noise = loss_noise + loss_n / 2    # 前n_motions和后n_motions各占一半，因此除以2。下同
-
-                # exp-related loss 表情相关损失
-                loss_expression = loss_expression + loss_exp / 2
-                loss_exp_vel = loss_exp_vel + loss_exp_v / 2
-                loss_exp_smooth = loss_exp_smooth + loss_exp_s / 2
-                
-                # head pose loss   头部姿势损失
-                if args.target == 'sample' and predict_head_pose and args.l_head_angle > 0:
-                    loss_head_angle = loss_head_angle + loss_ha / 2
-                if args.target == 'sample' and predict_head_pose and args.l_head_vel > 0 and loss_hc is not None:
-                    loss_head_vel = loss_head_vel + loss_hc / 2
-                if args.target == 'sample' and predict_head_pose and args.l_head_smooth > 0 and loss_hs is not None:
-                    loss_head_smooth = loss_head_smooth + loss_hs / 2
-                if args.target == 'sample' and predict_head_pose and args.l_head_trans > 0 and loss_ht is not None:
-                    # no need to divide by 2 because it only applies to the second clip
-                    loss_head_trans = loss_head_trans + loss_ht
+            # simple loss
+            loss_noise     = loss_n
+            loss_expression = loss_exp
+            loss_exp_vel    = loss_exp_v
+            loss_exp_smooth = loss_exp_s
+            loss_head_angle = loss_ha if (args.target == 'sample' and predict_head_pose and args.l_head_angle > 0 and loss_ha is not None) else torch.tensor(0, device=device)
+            loss_head_vel   = loss_hc if (args.target == 'sample' and predict_head_pose and args.l_head_vel > 0 and loss_hc is not None) else torch.tensor(0, device=device)
+            loss_head_smooth = loss_hs if (args.target == 'sample' and predict_head_pose and args.l_head_smooth > 0 and loss_hs is not None) else torch.tensor(0, device=device)
+            loss_head_trans = loss_ht if (args.target == 'sample' and predict_head_pose and args.l_head_trans > 0 and loss_ht is not None) else torch.tensor(0, device=device)
 
             loss_log['noise'].append(loss_noise.item())
             loss = loss_noise
@@ -468,56 +388,53 @@ def count_parameters(model):
 def main(args, option_text=None):
     # model 模型
     model_kwargs = dict(
-        device              = device,  
+        device              = device,
         target              = args.target,              # ('--target', type=str, default='sample', choices=['sample', 'noise'])
         architecture        = args.architecture,        # ('--architecture', type=str, default='decoder', choices=['decoder'])
         motion_feat_dim     = args.motion_feat_dim,     # ('--motion_feat_dim', type=int, default=70)
         fps                 = args.fps,                 # ('--fps', type=int, default=25, help='frame per second')
-        n_motions           = args.n_motions,           # ('--n_motions', type=int, default=100, help='number of motions in a sequence')
-        n_prev_motions      = args.n_prev_motions,      # ('--n_prev_motions', type=int, default=25, help='number of pre-motions in a sequence')
+        n_motions           = args.n_motions,           # ('--n_motions', type=int, default=64, help='number of motions in a sequence')
+        n_prev_motions      = args.n_prev_motions,      # ('--n_prev_motions', type=int, default=16, help='number of pre-motions in a sequence')
         audio_model         = args.audio_model,         # ('--audio_model', type=str, default='wav2vec2', choices=['wav2vec2', 'hubert', 'hubert_zh', 'hubert_zh_ori'])
-        feature_dim         = args.feature_dim,         # ('--feature_dim', type=int, default=256, help='dimension of the hidden feature')
-        n_diff_steps        = args.n_diff_steps,        # ('--n_diff_steps', type=int, default=50, help='number of diffusion steps')
+        feature_dim         = args.feature_dim,         # ('--feature_dim', type=int, default=512, help='dimension of the hidden feature')
+        n_diff_steps        = args.n_diff_steps,        # ('--n_diff_steps', type=int, default=500, help='number of diffusion steps')
         diff_schedule       = args.diff_schedule,       # ('--diff_schedule', type=str, default='cosine', choices=['linear', 'cosine', 'quadratic', 'sigmoid'])
         cfg_mode            = args.cfg_mode,            # ('--cfg_mode', type=str, default='incremental', choices=['incremental', 'independent'])
-        guiding_conditions  = args.guiding_conditions,  # ('--guiding_conditions', type=str, default='audio,')
+        guiding_conditions  = args.guiding_conditions,  # ('--guiding_conditions', type=str, default='audio,emotion')
+        align_mask_width    = args.align_mask_width,    # ('--align_mask_width', type=int, default=2, help='width of the alignment mask, non-positive for no mask')
     )
 
     model = DitTalkingHead(**model_kwargs)            
 
     exp_dir = Path('experiments/emo_dit') / f'{args.exp_name}'     
     start_iter = 0
-    # ckpt_dir = exp_dir / 'checkpoints'       
-    # pt_files = list(ckpt_dir.glob('*.pt'))
-    # if pt_files:   # 模型加载（lr的加载没完成，建议还是从头开始。。。）
-    #     ckpt_path = sorted(pt_files, reverse=True)[0]    # 获取最新的模型文件路径
-    #     model_data = torch.load(ckpt_path, map_location=device)
-    #     model.load_state_dict(model_data['model'], strict=False)
-    #     start_iter = model_data['iter'] + 1
-    #     print(f"Loading model from {ckpt_path}, start from iter {start_iter}.")
 
     # Dataset
     train_dataset = EmoLevelDataset(args.data_root,                          # 'prepare_data/'  数据集根目录
                                             motion_filename=args.motion_filename,    # 运动文件  'motions.pkl'
                                             motion_template_filename=args.motion_template_filename,   # motion_template.pkl
                                             split="train",
-                                            coef_fps=args.fps,                           # 25    为什么是30呢？？？
-                                            n_motions=args.n_motions,                    # 100
+                                            coef_fps=args.fps,                           # 25
+                                            n_motions=args.n_motions,                    # 64
+                                            n_prev_motions=args.n_prev_motions,          # 16
                                             crop_strategy=args.crop_strategy,            # random
                                             normalize_type=args.normalize_type)          # mix
-    val_dataset = EmoLevelDataset(args.data_root, motion_filename=args.motion_filename, 
-                                           motion_template_filename=args.motion_template_filename, split="val", coef_fps=args.fps, n_motions=args.n_motions, 
-                                           crop_strategy=args.crop_strategy, normalize_type=args.normalize_type)
+    # val_dataset = EmoLevelDataset(args.data_root, motion_filename=args.motion_filename,
+    #                                        motion_template_filename=args.motion_template_filename, split="val", coef_fps=args.fps, n_motions=args.n_motions,
+    #                                        n_prev_motions=args.n_prev_motions,
+    #                                        crop_strategy=args.crop_strategy, normalize_type=args.normalize_type)
     train_loader = data.DataLoader(train_dataset,
-                                    batch_size=args.batch_size,       # 16
+                                    batch_size=args.batch_size,     
                                     shuffle=True,
-                                    num_workers=args.num_workers,     # 4
+                                    num_workers=args.num_workers,    
                                     pin_memory=True)
-    val_loader = data.DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
+    # val_loader = data.DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers)
+    val_loader = None
 
     # 情感分类器
     classifier = Classifier().to(device)
-    classifier.load_state_dict(torch.load(f'pretrained_weights/ADEF/emo_classifier/emo_level_classifier.pth', map_location=device), strict=False)
+    # classifier.load_state_dict(torch.load(f'pretrained_weights/ADEF/emo_classifier/emo_level_classifier.pth', map_location=device), strict=False)
+    classifier.load_state_dict(torch.load(f'experiments/emo_classifier/ckpt_n64.pth', map_location=device), strict=False)
     classifier.eval()
 
     # Logging    TensorBoard的日志
@@ -572,10 +489,10 @@ if __name__ == '__main__':
     parser.add_argument('--exp_name', type=str, default=g_exp_name, help='experiment name')
 
     # Dataset
-    parser.add_argument('--data_root', type=Path, default="src/my_prepare/",)
+    parser.add_argument('--data_root', type=Path, default="src/data_processing/RAVDESS",)
     parser.add_argument('--motion_filename', type=str, default='front_all_motions.pkl')             # templates
     parser.add_argument('--motion_template_filename', type=str, default='motion_template.pkl')     # motion_template
-    parser.add_argument('--batch_size', type=int, default=32, help='batch size')
+    parser.add_argument('--batch_size', type=int, default=128, help='batch size')
     parser.add_argument('--num_workers', type=int, default=4, help='number of workers for dataloader')
     parser.add_argument('--crop_strategy', type=str, default="random")
     parser.add_argument('--normalize_type', type=str, default="mix", choices=["std", "case", "scale", "minmax", "mix"])
@@ -584,7 +501,7 @@ if __name__ == '__main__':
     parser.add_argument('--target', type=str, default='sample', choices=['sample', 'noise'])
     parser.add_argument('--guiding_conditions', type=str, default='audio,emotion')
     parser.add_argument('--cfg_mode', type=str, default='incremental', choices=['incremental', 'independent'])
-    parser.add_argument('--n_diff_steps', type=int, default=50, help='number of diffusion steps')
+    parser.add_argument('--n_diff_steps', type=int, default=500, help='number of diffusion steps')
     parser.add_argument('--diff_schedule', type=str, default='cosine', choices=['linear', 'cosine', 'quadratic', 'sigmoid'])
     parser.add_argument('--no_head_pose', action='store_true', default=False, help='do not predict head pose')
     parser.add_argument('--rot_repr', type=str, default='aa', choices=['aa'])
@@ -592,23 +509,23 @@ if __name__ == '__main__':
     # transformer
     parser.add_argument('--audio_model', type=str, default='wav2vec2', choices=['wav2vec2', 'hubert', 'hubert_zh', 'hubert_zh_ori'])
     parser.add_argument('--architecture', type=str, default='decoder', choices=['decoder'])
-    parser.add_argument('--align_mask_width', type=int, default=1, help='width of the alignment mask, non-positive for no mask')
+    parser.add_argument('--align_mask_width', type=int, default=2, help='width of the alignment mask, non-positive for no mask')
     parser.add_argument('--no_use_learnable_pe', action='store_true', help='do not use learnable positional encoding')
     parser.add_argument('--use_indicator', action='store_true', default=True, help='use indicator for padded frames')
     parser.add_argument('--feature_dim', type=int, default=512, help='dimension of the hidden feature')
     parser.add_argument('--n_heads', type=int, default=8, help='number of attention heads')
-    parser.add_argument('--n_layers', type=int, default=6, help='number of encoder/decoder layers')
+    parser.add_argument('--n_layers', type=int, default=8, help='number of encoder/decoder layers')
     parser.add_argument('--mlp_ratio', type=int, default=4, help='ratio of the hidden dimension of the MLP')
 
     # sequence
-    parser.add_argument('--n_motions', type=int, default=100, help='number of motions in a sequence')
-    parser.add_argument('--n_prev_motions', type=int, default=25, help='number of pre-motions in a sequence')
+    parser.add_argument('--n_motions', type=int, default=64, help='number of motions in a sequence')
+    parser.add_argument('--n_prev_motions', type=int, default=16, help='number of pre-motions in a sequence')
     parser.add_argument('--motion_feat_dim', type=int, default=70)
     parser.add_argument('--fps', type=int, default=25, help='frame per second')      
     parser.add_argument('--pad_mode', type=str, default='zero', choices=['zero', 'replicate'])
 
     # Training
-    parser.add_argument('--max_iter', type=int, default=100000, help='max number of iterations')   
+    parser.add_argument('--max_iter', type=int, default=300000, help='max number of iterations')   
     parser.add_argument('--lr', type=float, default=1e-4, help='learning rate')
     parser.add_argument('--gradient_accumulation_steps', type=int, default=1, help='gradient accumulation')
     parser.add_argument('--scheduler', type=str, default='WarmupThenDecay', choices=['None', 'Warmup', 'WarmupThenDecay'])
@@ -616,7 +533,7 @@ if __name__ == '__main__':
     # 损失函数 & 权重
     parser.add_argument('--criterion', type=str, default='l2', choices=['l1', 'l2'])
     parser.add_argument('--clip_grad', default=True, action='store_true')
-    parser.add_argument('--l_exp', type=float, default=0.1, help='weight of the head angle loss')
+    parser.add_argument('--l_exp', type=float, default=1.0, help='weight of the head angle loss')
     parser.add_argument('--l_exp_vel', type=float, default=1e-4, help='weight of the head angle loss')     
     parser.add_argument('--l_exp_smooth', type=float, default=1e-4, help='weight of the head angle loss')  
     parser.add_argument('--l_head_angle', type=float, default=1e-2, help='weight of the head angle loss')
@@ -629,14 +546,14 @@ if __name__ == '__main__':
     parser.add_argument('--trunc_prob1', type=float, default=0.3, help='truncation probability for the first sample')
     parser.add_argument('--trunc_prob2', type=float, default=0.4, help='truncation probability for the second sample')
 
-    parser.add_argument('--save_iter', type=int, default=1000, help='save model every x iterations')
+    parser.add_argument('--save_iter', type=int, default=5000, help='save model every x iterations')
     parser.add_argument('--val_iter', type=int, default=50, help='validate every x iterations')
     parser.add_argument('--log_iter', type=int, default=50, help='log to tensorboard every x iterations')
     parser.add_argument('--log_smooth_win', type=int, default=50, help='smooth window for logging')
 
     # warm_up
-    parser.add_argument('--warm_iter', type=int, default=10000)         
-    parser.add_argument('--cos_max_iter', type=int, default=100000)    
+    parser.add_argument('--warm_iter', type=int, default=20000)         
+    parser.add_argument('--cos_max_iter', type=int, default=200000)    
     parser.add_argument('--min_lr_ratio', type=float, default=0.02)
 
     args = parser.parse_args()
