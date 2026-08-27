@@ -33,11 +33,24 @@ jobs:
 
           path = Path('scripts/generate_adef_model_training_variants.py')
           text = path.read_text(encoding='utf-8')
-          old = '    """Frame-preserving multi-scale temporal refinement for speech features."""'
-          new = '    # Frame-preserving multi-scale temporal refinement for speech features.'
-          if text.count(old) != 1:
-              raise RuntimeError(f'Expected one nested docstring, found {text.count(old)}')
-          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          old_doc = '    """Frame-preserving multi-scale temporal refinement for speech features."""'
+          new_doc = '    # Frame-preserving multi-scale temporal refinement for speech features.'
+          if text.count(old_doc) != 1:
+              raise RuntimeError(f'Expected one nested docstring, found {text.count(old_doc)}')
+          text = text.replace(old_doc, new_doc, 1)
+
+          old_check = '''    if count != 1:
+        raise RuntimeError(f"{label}: expected one match, found {count}")
+    return text.replace(old, new, 1)'''
+          new_check = '''    if count < 1:
+        raise RuntimeError(f"{label}: expected at least one match, found {count}")
+    return text.replace(old, new, 1)'''
+          if text.count(old_check) != 1:
+              raise RuntimeError(f'Expected one replace_once validation block, found {text.count(old_check)}')
+          text = text.replace(old_check, new_check, 1)
+
+          path.write_text(text, encoding='utf-8')
           PY
           python -m py_compile scripts/generate_adef_model_training_variants.py
           python scripts/generate_adef_model_training_variants.py
