@@ -206,7 +206,6 @@ def train(args, model, train_loader, val_loader, optimizer, save_dir, scheduler=
             prev_motion_for_loss = prev_motion_gt
 
         # ---------- 损失 ----------
-        # ---------- 损失 ----------
         loss_n, loss_exp, loss_exp_v, loss_exp_s, loss_ha, loss_hc, loss_hs, loss_ht = utils.compute_loss_new(
             args, is_starting_sample, current_motion, noise, target, prev_motion_for_loss, end_idx,
         )
@@ -264,6 +263,9 @@ def train(args, model, train_loader, val_loader, optimizer, save_dir, scheduler=
             micro_step % args.gradient_accumulation_steps == 0
             or it == args.max_iter
         )
+        optimizer_update = (
+            micro_step + args.gradient_accumulation_steps - 1
+        ) // args.gradient_accumulation_steps
         if should_step:
             if args.clip_grad:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0)
@@ -306,9 +308,9 @@ def train(args, model, train_loader, val_loader, optimizer, save_dir, scheduler=
                 writer.add_scalar('train/head_trans', np.mean(loss_log['head_trans']), it)    #  
             writer.add_scalar('opt/lr', optimizer.param_groups[0]['lr'], it)          # 学习率曲线
 
-        # update learning rate  更新学习率
-        if scheduler is not None:   # 调度器用于更新学习率  区分：优化器optimizor
-            if args.scheduler != 'WarmupThenDecay' or (args.scheduler == 'WarmupThenDecay' and it < args.cos_max_iter):
+        # update learning rate only after a real optimizer update
+        if scheduler is not None and should_step:
+            if args.scheduler != 'WarmupThenDecay' or optimizer_update < args.cos_max_iter:
                 scheduler.step()
 
         # save model   保存模型中间结果
@@ -505,6 +507,9 @@ def main(args, option_text=None):
     )
 
     model = DitTalkingHead(**model_kwargs)            
+    args.model_module = DitTalkingHead.__module__
+    args.optimization_variant = Path(__file__).stem
+
 
     exp_dir = Path('experiments/emo_dit') / f'{args.exp_name}'     
     start_iter = 0

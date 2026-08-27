@@ -51,3 +51,12 @@
 4. Min-SNR + EMA。
 
 先保持数据划分、batch size、训练步数、CFG 和随机种子一致，分别单独训练。不要一开始合并四组修改，否则无法判断指标提升来自哪里。
+
+## 运行注意事项
+
+- 四个训练脚本都会把 `args.model_module` 和 `args.optimization_variant` 写入 checkpoint，便于后续按对应的完整模型文件恢复。
+- 四组模型均修正了 learnable positional encoding 的长度：位置参数与 `n_prev_motions + n_motions` 完全一致，不再多出一个未使用 token。
+- 嘴部专项损失会依据 `end_idx` 屏蔽随机截断后的 padding 帧；速度和加速度损失使用相应的相邻有效帧掩码。
+- 当 `gradient_accumulation_steps > 1` 时，scheduler 只在真实 `optimizer.step()` 后更新。
+- Lip-aware、Audio pyramid 和 Channel gate 默认面向 `target=sample`；Min-SNR + EMA 同时兼容当前 `sample` 与 `noise` 目标，但建议先以 `sample` 做可比实验。
+

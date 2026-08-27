@@ -186,7 +186,7 @@ class DenoisingNetwork(nn.Module):
         )
 
         if self.use_learnable_pe:
-            self.PE = nn.Parameter(torch.randn(1, 1 + self.n_prev_motions + self.n_motions, self.feature_dim))
+            self.PE = nn.Parameter(torch.randn(1, self.n_prev_motions + self.n_motions, self.feature_dim))
         else:
             self.PE = PositionalEncoding(self.feature_dim)
 

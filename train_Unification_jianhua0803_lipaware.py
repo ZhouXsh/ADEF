@@ -106,24 +106,58 @@ LIP_DIM_INDICES = tuple(
 )
 
 
-def compute_lip_losses(target, current_motion, prev_motion, n_prev):
+def _masked_smooth_l1(prediction, target, valid_mask):
+    elementwise = torch.nn.functional.smooth_l1_loss(
+        prediction, target, reduction='none'
+    ).mean(dim=-1)
+    if valid_mask.any():
+        return elementwise[valid_mask].mean()
+    return prediction.new_zeros(())
+
+
+def compute_lip_losses(target, current_motion, prev_motion, n_prev, end_idx=None):
     pred = target[:, n_prev:, :63][..., list(LIP_DIM_INDICES)]
     gt = current_motion[:, :, :63][..., list(LIP_DIM_INDICES)]
-    loss_pos = torch.nn.functional.smooth_l1_loss(pred, gt)
-    loss_vel = torch.nn.functional.smooth_l1_loss(
-        pred[:, 1:] - pred[:, :-1], gt[:, 1:] - gt[:, :-1]
+
+    if end_idx is None:
+        valid = torch.ones(pred.shape[:2], dtype=torch.bool, device=pred.device)
+    else:
+        valid = torch.arange(pred.shape[1], device=pred.device).expand(
+            pred.shape[0], -1
+        ) < end_idx.unsqueeze(1)
+
+    loss_pos = _masked_smooth_l1(pred, gt, valid)
+
+    velocity_valid = valid[:, 1:] & valid[:, :-1]
+    loss_vel = _masked_smooth_l1(
+        pred[:, 1:] - pred[:, :-1],
+        gt[:, 1:] - gt[:, :-1],
+        velocity_valid,
     )
+
+    acceleration_valid = valid[:, 2:] & valid[:, 1:-1] & valid[:, :-2]
     pred_acc = pred[:, 2:] - 2 * pred[:, 1:-1] + pred[:, :-2]
     gt_acc = gt[:, 2:] - 2 * gt[:, 1:-1] + gt[:, :-2]
-    loss_acc = torch.nn.functional.smooth_l1_loss(pred_acc, gt_acc)
+    loss_acc = _masked_smooth_l1(pred_acc, gt_acc, acceleration_valid)
+
     if prev_motion is None:
         loss_boundary = pred.new_zeros(())
     else:
         prev_last = prev_motion[:, -1, :63][..., list(LIP_DIM_INDICES)]
-        loss_boundary = torch.nn.functional.smooth_l1_loss(
-            pred[:, 0] - prev_last, gt[:, 0] - prev_last
+        boundary_error = torch.nn.functional.smooth_l1_loss(
+            pred[:, 0] - prev_last,
+            gt[:, 0] - prev_last,
+            reduction='none',
+        ).mean(dim=-1)
+        boundary_valid = valid[:, 0]
+        loss_boundary = (
+            boundary_error[boundary_valid].mean()
+            if boundary_valid.any()
+            else pred.new_zeros(())
         )
+
     return loss_pos, loss_vel, loss_acc, loss_boundary
+
 
 def train(args, model, train_loader, val_loader, optimizer, save_dir, scheduler=None, writer=None, start_iter=0, classifier=None):
 
@@ -206,7 +240,6 @@ def train(args, model, train_loader, val_loader, optimizer, save_dir, scheduler=
             prev_motion_for_loss = prev_motion_gt
 
         # ---------- 损失 ----------
-        # ---------- 损失 ----------
         loss_n, loss_exp, loss_exp_v, loss_exp_s, loss_ha, loss_hc, loss_hs, loss_ht = utils.compute_loss_new(
             args, is_starting_sample, current_motion, noise, target, prev_motion_for_loss, end_idx,
         )
@@ -226,7 +259,8 @@ def train(args, model, train_loader, val_loader, optimizer, save_dir, scheduler=
         loss_exp_vel    = loss_exp_v
         loss_exp_smooth = loss_exp_s
         loss_lip_pos, loss_lip_vel, loss_lip_acc, loss_lip_boundary = compute_lip_losses(
-            target, current_motion, prev_motion_for_loss, args.n_prev_motions
+            target, current_motion, prev_motion_for_loss,
+            args.n_prev_motions, end_idx=end_idx,
         )
         loss_head_angle = loss_ha if (args.target == 'sample' and predict_head_pose and args.l_head_angle > 0 and loss_ha is not None) else torch.tensor(0, device=device)
         loss_head_vel   = loss_hc if (args.target == 'sample' and predict_head_pose and args.l_head_vel > 0 and loss_hc is not None) else torch.tensor(0, device=device)
@@ -280,6 +314,9 @@ def train(args, model, train_loader, val_loader, optimizer, save_dir, scheduler=
             micro_step % args.gradient_accumulation_steps == 0
             or it == args.max_iter
         )
+        optimizer_update = (
+            micro_step + args.gradient_accumulation_steps - 1
+        ) // args.gradient_accumulation_steps
         if should_step:
             if args.clip_grad:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=2.0)
@@ -322,9 +359,9 @@ def train(args, model, train_loader, val_loader, optimizer, save_dir, scheduler=
                 writer.add_scalar('train/head_trans', np.mean(loss_log['head_trans']), it)    #  
             writer.add_scalar('opt/lr', optimizer.param_groups[0]['lr'], it)          # 学习率曲线
 
-        # update learning rate  更新学习率
-        if scheduler is not None:   # 调度器用于更新学习率  区分：优化器optimizor
-            if args.scheduler != 'WarmupThenDecay' or (args.scheduler == 'WarmupThenDecay' and it < args.cos_max_iter):
+        # update learning rate only after a real optimizer update
+        if scheduler is not None and should_step:
+            if args.scheduler != 'WarmupThenDecay' or optimizer_update < args.cos_max_iter:
                 scheduler.step()
 
         # save model   保存模型中间结果
@@ -521,6 +558,9 @@ def main(args, option_text=None):
     )
 
     model = DitTalkingHead(**model_kwargs)            
+    args.model_module = DitTalkingHead.__module__
+    args.optimization_variant = Path(__file__).stem
+
 
     exp_dir = Path('experiments/emo_dit') / f'{args.exp_name}'     
     start_iter = 0
