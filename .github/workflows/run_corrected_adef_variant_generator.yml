@@ -40,15 +40,22 @@ jobs:
               raise RuntimeError(f'Expected one nested docstring, found {text.count(old_doc)}')
           text = text.replace(old_doc, new_doc, 1)
 
-          old_check = '''    if count != 1:
-        raise RuntimeError(f"{label}: expected one match, found {count}")
-    return text.replace(old, new, 1)'''
-          new_check = '''    if count < 1:
-        raise RuntimeError(f"{label}: expected at least one match, found {count}")
-    return text.replace(old, new, 1)'''
-          if text.count(old_check) != 1:
-              raise RuntimeError(f'Expected one replace_once validation block, found {text.count(old_check)}')
-          text = text.replace(old_check, new_check, 1)
+          lines = text.splitlines(keepends=True)
+          function_start = next(
+              index for index, line in enumerate(lines)
+              if line.startswith('def replace_once(')
+          )
+          condition_index = next(
+              index for index in range(function_start, function_start + 10)
+              if lines[index].strip() == 'if count != 1:'
+          )
+          condition_indent = lines[condition_index][:-len(lines[condition_index].lstrip())]
+          lines[condition_index] = condition_indent + 'if count < 1:\n'
+          lines[condition_index + 1] = (
+              condition_indent
+              + '    raise RuntimeError(f"{label}: expected at least one match, found {count}")\n'
+          )
+          text = ''.join(lines)
 
           path.write_text(text, encoding='utf-8')
           PY
