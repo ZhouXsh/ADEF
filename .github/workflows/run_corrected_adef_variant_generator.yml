@@ -57,6 +57,12 @@ jobs:
           )
           text = ''.join(lines)
 
+          old_ema_match = '"    model = DitTalkingHead(**model_kwargs)           \\n",'
+          new_ema_match = '"    model = DitTalkingHead(**model_kwargs)            \\n",'
+          if text.count(old_ema_match) != 1:
+              raise RuntimeError(f'Expected one EMA model match literal, found {text.count(old_ema_match)}')
+          text = text.replace(old_ema_match, new_ema_match, 1)
+
           path.write_text(text, encoding='utf-8')
           PY
           python -m py_compile scripts/generate_adef_model_training_variants.py
