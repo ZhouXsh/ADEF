@@ -30,30 +30,41 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-          import re
-          import textwrap
 
           workflow_path = Path('.github/workflows/generate_adef_optimization_variants.yml')
           raw = workflow_path.read_text(encoding='utf-8').splitlines(keepends=True)
           start = next(i for i, line in enumerate(raw) if line.strip() == "python - <<'PY'") + 1
           end = next(i for i in range(start, len(raw)) if raw[i].strip() == 'PY')
-          source = textwrap.dedent(''.join(raw[start:end]))
 
-          bad = re.compile(
-              r"\n\s*if '_legacy' in content or 'import emotion_dit_Unification_jianhua0803' in content:\n"
-              r"\s*raise RuntimeError\(f'\{path\} unexpectedly imports a sample implementation\.'\)"
+          first_nonempty = next(line for line in raw[start:end] if line.strip())
+          indent = len(first_nonempty) - len(first_nonempty.lstrip())
+          source_lines = []
+          for line in raw[start:end]:
+              if not line.strip():
+                  source_lines.append('\n')
+                  continue
+              current_indent = len(line) - len(line.lstrip())
+              if current_indent < indent:
+                  raise RuntimeError(
+                      f'Generator line has less indentation than expected: {line!r}'
+                  )
+              source_lines.append(line[indent:])
+          source = ''.join(source_lines)
+
+          bad = """    if '_legacy' in content or 'import emotion_dit_Unification_jianhua0803' in content:
+              raise RuntimeError(f'{path} unexpectedly imports a sample implementation.')"""
+          replacement = """    forbidden_imports = (
+              'from . import emotion_dit_Unification_jianhua0803_legacy',
+              'from .emotion_dit_Unification_jianhua0803 import',
+              'DitTalkingHead as _BaseDitTalkingHead',
           )
-          replacement = """
-              forbidden_imports = (
-                  'from . import emotion_dit_Unification_jianhua0803_legacy',
-                  'from .emotion_dit_Unification_jianhua0803 import',
-                  'DitTalkingHead as _BaseDitTalkingHead',
+          if any(token in content for token in forbidden_imports):
+              raise RuntimeError(f'{path} unexpectedly imports a sample implementation.')"""
+          if source.count(bad) != 1:
+              raise RuntimeError(
+                  f'Could not correct generator validation block: matches={source.count(bad)}'
               )
-              if any(token in content for token in forbidden_imports):
-                  raise RuntimeError(f'{path} unexpectedly imports a sample implementation.')"""
-          source, count = bad.subn('\n' + textwrap.dedent(replacement).rstrip(), source, count=1)
-          if count != 1:
-              raise RuntimeError(f'Could not correct generator validation block: matches={count}')
+          source = source.replace(bad, replacement, 1)
 
           namespace = {'__name__': '__main__'}
           exec(compile(source, '<corrected-variant-generator>', 'exec'), namespace, namespace)
