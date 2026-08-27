@@ -44,11 +44,13 @@ jobs:
                   source_lines.append('\n')
                   continue
               current_indent = len(line) - len(line.lstrip())
-              if current_indent < indent:
-                  raise RuntimeError(
-                      f'Generator line has less indentation than expected: {line!r}'
-                  )
-              source_lines.append(line[indent:])
+              # Ordinary generator code carries the YAML block prefix. Lines with
+              # less indentation occur only inside Python triple-quoted replacement
+              # strings and must be preserved literally.
+              if current_indent >= indent:
+                  source_lines.append(line[indent:])
+              else:
+                  source_lines.append(line)
           source = ''.join(source_lines)
 
           bad = """    if '_legacy' in content or 'import emotion_dit_Unification_jianhua0803' in content:
