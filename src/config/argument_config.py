@@ -29,9 +29,6 @@ class ArgumentConfig(PrintableConfig):
     save_results: Literal[True, False] = False  # 是否保存DiT的生成结果
 
     ########## inference arguments 推理参数 ##########
-    checkpoint_MotionGenerator: Annotated[
-        str, tyro.conf.arg(aliases=["--motion-ckpt"])
-    ] = make_abs_path('../../experiments/emo_dit/20260815_fuke_20260806_emotion_dit_Unification_bs128_lexp1/checkpoints/iter_0200000.pt')
     flag_use_half_precision: bool = False  # whether to use half precision (FP16). If black boxes appear, it might be due to GPU incompatibility; set to False.
     device_id: int = 1  # gpu device id
     flag_force_cpu: bool = False  # force cpu inference, WIP!
