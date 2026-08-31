@@ -1097,6 +1097,16 @@ def train(args, model, generic_dataset, mead_dataset, optimizer, save_dir,
                 "head_trans",
             ):
                 writer.add_scalar(f"train/{key}_loss", np.mean(loss_log[key]), iteration)
+
+            # Keep the original 0819 TensorBoard tag names so old and new
+            # experiments can be compared in the same dashboard.
+            writer.add_scalar("train/simple_loss", np.mean(loss_log["primary"]), iteration)
+            writer.add_scalar("train/exp_loss", np.mean(loss_log["expression"]), iteration)
+            writer.add_scalar("train/head_angle", np.mean(loss_log["head_angle"]), iteration)
+            writer.add_scalar("train/head_vel", np.mean(loss_log["head_vel"]), iteration)
+            writer.add_scalar("train/head_smooth", np.mean(loss_log["head_smooth"]), iteration)
+            writer.add_scalar("train/head_trans", np.mean(loss_log["head_trans"]), iteration)
+
             for key, value in lr_dict.items():
                 writer.add_scalar(f"opt/lr_{key}", value, iteration)
 
