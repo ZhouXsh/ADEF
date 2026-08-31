@@ -1,0 +1,62 @@
+name: Generate two-stage performance variants 0901
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - '.github/workflows/generate_twostage_performance_variants_0901.yml'
+      - '.github/payload_0901/**'
+
+permissions:
+  contents: write
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Restore generated source files
+        run: |
+          base64 -d .github/payload_0901/variants.tar.xz.b64 > /tmp/variants_0901.tar.xz
+          echo '731401f281608f567690489ed8cad75528f97df5f8793c4c2acea24962e04cf7  /tmp/variants_0901.tar.xz' | sha256sum -c -
+          tar -xJf /tmp/variants_0901.tar.xz -C .
+
+      - name: Validate generated Python files
+        run: |
+          python -m py_compile \
+            src/dataset/dataset_GenericTalkingMotion_clear_start0901.py \
+            train_Unification_twostage0901_schedule_ema.py \
+            train_Unification_twostage0901_sharedcond_ema.py \
+            train_Unification_twostage0901_sharedcond_minsnr_ema.py \
+            train_Unification_twostage0901_sharedcond_balanced_ema.py \
+            train_Unification_twostage0901_sharedcond_minsnr_balanced_ema.py \
+            train_Unification_twostage0901_sharedcond_minsnr_balanced_replay_ema.py
+          git diff --check
+
+      - name: Commit generated variants
+        run: |
+          rm -f .github/workflows/generate_twostage_performance_variants_0901.yml
+          rm -rf .github/payload_0901
+          git config user.name 'OpenAI Codex'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- \
+            src/dataset/dataset_GenericTalkingMotion_clear_start0901.py \
+            train_Unification_twostage0901_schedule_ema.py \
+            train_Unification_twostage0901_sharedcond_ema.py \
+            train_Unification_twostage0901_sharedcond_minsnr_ema.py \
+            train_Unification_twostage0901_sharedcond_balanced_ema.py \
+            train_Unification_twostage0901_sharedcond_minsnr_balanced_ema.py \
+            train_Unification_twostage0901_sharedcond_minsnr_balanced_replay_ema.py \
+            TWO_STAGE_PERFORMANCE_VARIANTS_0901.md
+          git add -u -- .github
+          git diff --cached --check
+          git commit -m 'add two-stage performance training variants 0901 [skip ci]'
+          git push origin HEAD:develop
