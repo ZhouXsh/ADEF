@@ -16,7 +16,27 @@ DiffusionSchedule = _legacy.DiffusionSchedule
 
 
 class DenoisingNetwork(_legacy.DenoisingNetwork):
-    """Legacy denoiser with a safe default indicator when the feature is enabled."""
+    """Legacy denoiser with corrected sequence PE and safe indicator handling."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # The denoiser input sequence is exactly [prev_motion, current_motion],
+        # i.e. n_prev_motions + n_motions tokens. The diffusion-step embedding
+        # is injected separately into DiTDecoder and is NOT concatenated as an
+        # extra token. The legacy learnable PE allocated one unused extra token
+        # (1 + n_prev_motions + n_motions), which causes 80-vs-81 broadcasting
+        # failure as soon as learnable PE is actually enabled by the 0901 scripts.
+        if self.use_learnable_pe:
+            expected_seq_len = self.n_prev_motions + self.n_motions
+            if self.PE.shape[1] != expected_seq_len:
+                if self.PE.shape[1] < expected_seq_len:
+                    raise ValueError(
+                        f"Learnable PE is too short: {self.PE.shape[1]} < {expected_seq_len}"
+                    )
+                self.PE = torch.nn.Parameter(
+                    self.PE[:, :expected_seq_len].detach().clone()
+                )
 
     def forward(self, motion_feat, audio_feat, prev_motion_feat, prev_audio_feat,
                 step, indicator=None):
