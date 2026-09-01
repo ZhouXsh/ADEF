@@ -1,0 +1,27 @@
+# Pinned versions for the ADEF FVD evaluation environment.
+# The FVD reference implementation uses TF1-style graph APIs
+# (tensorflow.compat.v1 + hub.Module), so we pin to versions where these
+# APIs are still wired together correctly.
+setuptools<81
+pip<25
+
+# TensorFlow + companion packages
+tensorflow==2.13.0
+tensorflow-hub==0.13.0
+tensorflow-gan==2.1.0
+tensorflow-probability==0.20.1
+tensorflow-estimator==2.13.0
+
+# Core FVD runtime requirements (kept from the reference README).
+six==1.16.0
+
+# Video I/O.
+decord==0.6.0
+av==12.1.0
+imageio==2.34.2
+imageio-ffmpeg==0.5.1
+opencv-python==4.10.0.84
+pillow==10.3.0
+
+# Misc
+tqdm==4.66.4

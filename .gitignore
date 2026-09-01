@@ -1,4 +1,6 @@
+# ============================================================
 # Byte-compiled / optimized / DLL files
+# ============================================================
 __pycache__/
 *.py[cod]
 *$py.class
@@ -6,7 +8,9 @@ __pycache__/
 # C extensions
 *.so
 
+# ============================================================
 # Distribution / packaging
+# ============================================================
 .Python
 build/
 develop-eggs/
@@ -161,21 +165,146 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
+# ============================================================
+# Project-specific: top-level data & experiments
+# ============================================================
 /data/
 /pretrained_weights/
 /experiments/
 /dataset/
 经验教训/
-*.mp4
 /src_dice_migration/
 /assets/
-/eval/
-
 /tmp/
 
 src/my_prepare/*.pkl
-# src/my_prepare/*.txt
 src/data_processing
 *-bak.py
-
 generate.py
+
+# ============================================================
+# ADEF_remake/eval/ — track the source code, ignore heavy artifacts
+# ============================================================
+#
+# We DO track /eval/ as a whole so the evaluation code (Python scripts,
+# shell scripts, READMEs, lightweight configs) can be committed.
+# Everything below scopes large/binary/runtime-generated content to /eval/
+# and is *additive* — it does not change behavior elsewhere in the repo.
+
+# ---------- Media files (covers RESULT/*.mp4 and the test sample) ----------
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.wav
+*.flac
+
+# ---------- Spreadsheets / large JSON-lines dumps from eval runs ----------
+*.xlsx
+*.jsonl
+
+# ---------- Inside /eval/: virtual environments ----------
+/eval/**/venv/
+/eval/**/.venv/
+/eval/**/env/
+/eval/**/.env/
+/eval/**/ENV/
+/eval/**/syncnet_venv/
+
+# ---------- Inside /eval/: model checkpoints & pretrained weights ----------
+# By extension (covers pth/pt/ckpt/bin/safetensors/onnx/model/dat/npy)
+/eval/**/*.pth
+/eval/**/*.pth.tar
+/eval/**/*.pt
+/eval/**/*.ckpt
+/eval/**/*.bin
+/eval/**/*.safetensors
+/eval/**/*.onnx
+/eval/**/*.model
+/eval/**/*.dat
+# Negate small data .npy files that the eval scripts actually read
+!/eval/evaluation_eat/code/base_68.npy
+!/eval/evaluation_eat/code/base_68_close.npy
+!/eval/evaluation_eat/code/rand_sample_lrw_filter100.npy
+!/eval/evaluation_eat/code/rand_sample_ours_mead100.npy
+
+# Pretrained-weights directories (ignore contents, keep README files)
+/eval/Emotion-FAN/pretrain_model/*
+!/eval/Emotion-FAN/pretrain_model/readme.md
+/eval/emonet/pretrained/*
+/eval/New_Emo/weights/*
+/eval/New_Emo/DFER-CLIP/checkpoint/*
+/eval/New_Emo/DFER-CLIP/log/*
+/eval/evaluation_eat/checkpoints/*
+!/eval/evaluation_eat/checkpoints/README.md
+/eval/evaluation_eat/code/pretrain_model/*
+/eval/pytorch-fid/models_cache/*
+/eval/syncnet_python/data/*
+
+# ---------- Inside /eval/: test results & runtime outputs ----------
+# RESULT/ holds per-method output videos + summary CSVs
+/eval/RESULT/
+/eval/eval_reports/
+/eval/reports/test/
+
+# evaluation_eat outputs / logs / intermediate results
+/eval/evaluation_eat/outputs/
+/eval/evaluation_eat/logs/
+/eval/evaluation_eat/result/
+/eval/evaluation_eat/talking_head_testing/
+/eval/evaluation_eat/code/result/
+/eval/evaluation_eat/code/result_emoacc/
+/eval/evaluation_eat/code/result_lrw/
+/eval/evaluation_eat/code/result_psnr/
+/eval/evaluation_eat/code/result_psnr_lrw/
+/eval/evaluation_eat/code/results/
+/eval/evaluation_eat/code/results_lastversion/
+/eval/evaluation_eat/code/results_lastversion_lrw/
+/eval/evaluation_eat/code/results_lrw/
+/eval/evaluation_eat/code/test_data_for_emotion/
+/eval/evaluation_eat/code/test_data_for_emotionacc/
+/eval/evaluation_eat/code/temps/
+/eval/evaluation_eat/code/tmp_imgs/
+/eval/evaluation_eat/code/preprocess_logs.txt
+/eval/evaluation_eat/code/syncnet_v2.model
+/eval/evaluation_eat/code/shape_predictor_68_face_landmarks.dat
+
+# syncnet_python intermediate processing dirs (all are runtime outputs)
+/eval/syncnet_python/GT_Angry/pyframes/
+/eval/syncnet_python/GT_Angry/pywork/
+/eval/syncnet_python/GT_Angry/pycrop/
+/eval/syncnet_python/GT_Angry/pytmp/
+/eval/syncnet_python/GT_Angry/pyavi/
+/eval/syncnet_python/img/
+
+# emonet caches / demo images / data
+/eval/emonet/pickles/
+/eval/emonet/images/
+/eval/emonet/emonet/data/
+
+# Wav2Lip test artifact image
+/eval/Wav2Lip/evaluation/frame_W029_cropped.jpg
+
+# ---------- Inside /eval/: individual test-result files at the eval/ root ----------
+/eval/LSE_HDTF.json
+/eval/LSE_HDTF_chunk.json
+/eval/LSE_HDTF.jsonl
+/eval/LSE_MEAD.json
+/eval/LSE_MEAD_chunk.json
+/eval/LSE_MEAD.jsonl
+/eval/LSE_MEAD.xlsx
+/eval/test.json
+/eval/my_double.txt
+/eval/emonet/emonet_eval_results.json
+/eval/pytorch-fid/results.json
+/eval/frechet_video_distance/fvd_result.json
+/eval/001.mp4
+
+# ---------- Vendored submodules: their embedded .git/ folders ----------
+# evaluation_eat/ and emonet/ were imported as plain copies; do not re-track
+# their inner git history when committing the eval code.
+/eval/**/*.git/
+
+# ============================================================
+# END eval/
+# ============================================================

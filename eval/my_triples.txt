@@ -1,0 +1,31 @@
+# my_triples.txt — final_evaluator.py 三元组列表
+#
+# 格式: 一行一个三元组，列分别为 image, audio, gt_video（逗号分隔）。
+# 顺序即为 fake 视频的生成 / 评估顺序。
+# 'final_evaluator.py --triples-file my_triples.txt' 会按这里出现的次序一一匹配。
+#
+# 内容来源: 三元组example.md（MEAD11 数据集 / M003 身份）
+#
+# line  emo       source
+#  1    angry     MEAD11 / M003 / front / angry     / level_3 / 001
+#  2    contempt  MEAD11 / M003 / front / contempt  / level_3 / 001
+#  3    disgusted MEAD11 / M003 / front / disgusted / level_3 / 001
+#  4    fear      MEAD11 / M003 / front / fear      / level_3 / 001
+#  5    happy     MEAD11 / M003 / front / happy     / level_3 / 001
+#  6    sad       MEAD11 / M003 / front / sad       / level_3 / 001
+#  7    surprised MEAD11 / M003 / front / surprised / level_3 / 001
+#  8    neutral   MEAD11 / M003 / front / neutral   / level_1 / 001
+#
+# 使用示例:
+#   python final_evaluator.py --triples-file my_triples.txt
+#   python final_evaluator.py --triples-file my_triples.txt --baselines wav2lip sadtalker
+#   python final_evaluator.py --triples-file my_triples.txt --dry-run
+#
+/home/Zhouxishi/VirtualMan_proj/ADEFv4/src/dataset/MEAD11/first_frame/M003_front_angry_level_3_001.png,/home/Zhouxishi/VirtualMan_proj/ADEFv4/src/dataset/MEAD11/videos/M003/front/angry/level_3/M003_front_angry_level_3_001.wav,/home/Zhouxishi/VirtualMan_proj/ADEFv4/src/dataset/MEAD11/videos/M003/front/angry/level_3/M003_front_angry_level_3_001.mp4
+/home/Zhouxishi/VirtualMan_proj/ADEFv4/src/dataset/MEAD11/first_frame/M003_front_contempt_level_3_001.png,/home/Zhouxishi/VirtualMan_proj/ADEFv4/src/dataset/MEAD11/videos/M003/front/contempt/level_3/M003_front_contempt_level_3_001.wav,/home/Zhouxishi/VirtualMan_proj/ADEFv4/src/dataset/MEAD11/videos/M003/front/contempt/level_3/M003_front_contempt_level_3_001.mp4
+/home/Zhouxishi/VirtualMan_proj/ADEFv4/src/dataset/MEAD11/first_frame/M003_front_disgusted_level_3_001.png,/home/Zhouxishi/VirtualMan_proj/ADEFv4/src/dataset/MEAD11/videos/M003/front/disgusted/level_3/M003_front_disgusted_level_3_001.wav,/home/Zhouxishi/VirtualMan_proj/ADEFv4/src/dataset/MEAD11/videos/M003/front/disgusted/level_3/M003_front_disgusted_level_3_001.mp4
+/home/Zhouxishi/VirtualMan_proj/ADEFv4/src/dataset/MEAD11/first_frame/M003_front_fear_level_3_001.png,/home/Zhouxishi/VirtualMan_proj/ADEFv4/src/dataset/MEAD11/videos/M003/front/fear/level_3/M003_front_fear_level_3_001.wav,/home/Zhouxishi/VirtualMan_proj/ADEFv4/src/dataset/MEAD11/videos/M003/front/fear/level_3/M003_front_fear_level_3_001.mp4
+/home/Zhouxishi/VirtualMan_proj/ADEFv4/src/dataset/MEAD11/first_frame/M003_front_happy_level_3_001.png,/home/Zhouxishi/VirtualMan_proj/ADEFv4/src/dataset/MEAD11/videos/M003/front/happy/level_3/M003_front_happy_level_3_001.wav,/home/Zhouxishi/VirtualMan_proj/ADEFv4/src/dataset/MEAD11/videos/M003/front/happy/level_3/M003_front_happy_level_3_001.mp4
+/home/Zhouxishi/VirtualMan_proj/ADEFv4/src/dataset/MEAD11/first_frame/M003_front_sad_level_3_001.png,/home/Zhouxishi/VirtualMan_proj/ADEFv4/src/dataset/MEAD11/videos/M003/front/sad/level_3/M003_front_sad_level_3_001.wav,/home/Zhouxishi/VirtualMan_proj/ADEFv4/src/dataset/MEAD11/videos/M003/front/sad/level_3/M003_front_sad_level_3_001.mp4
+/home/Zhouxishi/VirtualMan_proj/ADEFv4/src/dataset/MEAD11/first_frame/M003_front_surprised_level_3_001.png,/home/Zhouxishi/VirtualMan_proj/ADEFv4/src/dataset/MEAD11/videos/M003/front/surprised/level_3/M003_front_surprised_level_3_001.wav,/home/Zhouxishi/VirtualMan_proj/ADEFv4/src/dataset/MEAD11/videos/M003/front/surprised/level_3/M003_front_surprised_level_3_001.mp4
+/home/Zhouxishi/VirtualMan_proj/ADEFv4/src/dataset/MEAD11/first_frame/M003_front_neutral_level_1_001.png,/home/Zhouxishi/VirtualMan_proj/ADEFv4/src/dataset/MEAD11/videos/M003/front/neutral/level_1/M003_front_neutral_level_1_001.wav,/home/Zhouxishi/VirtualMan_proj/ADEFv4/src/dataset/MEAD11/videos/M003/front/neutral/level_1/M003_front_neutral_level_1_001.mp4
