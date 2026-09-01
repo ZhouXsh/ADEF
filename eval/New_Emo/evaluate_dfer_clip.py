@@ -1,84 +1,37 @@
 #!/usr/bin/env python3
+"""DFER-CLIP video emotion evaluation using the official BMVC'23 model.
+
+Important protocol note: DFEW/DFER-CLIP has seven classes and does not contain
+MEAD's ``contempt`` category.  Unsupported target labels are therefore marked
+``label_supported=false`` and excluded from the accuracy denominator instead
+of being silently counted as errors.
 """
-DFER-CLIP dynamic facial expression recognition for generated videos.
-
-Wraps the official DFER-CLIP repo (zengqunzhao/DFER-CLIP, BMVC'23) so it can
-ingest a single .mp4 file or a directory of videos. Internally:
-
-  1. samples exactly `num_segments` frames uniformly from each video
-  2. resizes each frame to 224x224 (the test transform used in main.py)
-  3. feeds them through the CLIP-visual-encoder + temporal-transformer
-  4. returns per-video softmax over the 7 DFEW classes
-
-The repo expects pretrained weights for both ViT-B/32 (CLIP backbone) and the
-DFEW fold-1 checkpoint. Set --clip_weights and --dfer_weights to local files.
-
-Usage:
-    # single video
-    python evaluate_dfer_clip.py --video /path/to/video.mp4
-
-    # batch
-    python evaluate_dfer_clip.py --video_dir /path/to/videos/ --label_file labels.txt
-
-    # choose fold + clip weights paths
-    python evaluate_dfer_clip.py --video a.mp4 \
-        --clip_weights /path/to/ViT-B-32.pt \
-        --dfer_weights /path/to/DFEW_fold1.pth
-
-    # pick a non-default GPU
-    python evaluate_dfer_clip.py --video a.mp4 --device cuda:1
-"""
-
 from __future__ import annotations
 
 import argparse
 import json
 import os
 import sys
-from collections import Counter
 from pathlib import Path
 from typing import Any
 
+import cv2
 import numpy as np
 import torch
 import torch.nn.functional as F
 from PIL import Image
 
-# Make sure the bundled clip/ submodule is importable.
 THIS_DIR = Path(__file__).resolve().parent
 DFER_DIR = THIS_DIR / "DFER-CLIP"
 if not DFER_DIR.is_dir():
-    sys.stderr.write(f"ERROR: DFER-CLIP repo not found at {DFER_DIR}\n")
-    sys.exit(2)
+    raise SystemExit(f"DFER-CLIP repo not found: {DFER_DIR}")
+for p in (DFER_DIR, DFER_DIR / "models"):
+    sys.path.insert(0, str(p))
+from clip import clip  # noqa: E402
+from models.Generate_Model import GenerateModel  # noqa: E402
+from dataloader.video_transform import GroupResize, Stack, ToTorchFormatTensor  # noqa: E402
 
-for p in [str(DFER_DIR), str(DFER_DIR / "models")]:
-    if p not in sys.path:
-        sys.path.insert(0, p)
-
-# Suppress matplotlib "non-interactive" warnings etc.
-import warnings
-warnings.filterwarnings("ignore")
-
-from clip import clip  # bundled OpenAI-style CLIP under DFER-CLIP/models/clip
-from models.Generate_Model import GenerateModel
-
-
-# 7 DFEW classes used by the trained checkpoint. Order matters: this is the
-# order printed to the JSON output and must match the prompt order.
-DFEW_CLASSES = [
-    "happiness",
-    "sadness",
-    "neutral",
-    "anger",
-    "surprise",
-    "disgust",
-    "fear",
-]
-
-# The released fold-1 checkpoint was trained with `text-type=class_descriptor`
-# (see DFER-CLIP/train_DFEW.sh), so we feed these descriptions into
-# PromptLearner — not the bare class names — otherwise logits come out
-# uninitialised.
+DFEW_CLASSES = ["happiness", "sadness", "neutral", "anger", "surprise", "disgust", "fear"]
 DFEW_DESCRIPTORS = [
     "a smiling mouth, raised cheeks, wrinkled eyes, and arched eyebrows.",
     "tears, a downward turned mouth, drooping upper eyelids, and a wrinkled forehead.",
@@ -88,239 +41,204 @@ DFEW_DESCRIPTORS = [
     "a wrinkled nose, lowered eyebrows, a tightened mouth, and narrow eyes.",
     "raised eyebrows, parted lips, a furrowed brow, and a retracted chin.",
 ]
+ALIASES = {
+    "happy": "happiness", "happiness": "happiness",
+    "sad": "sadness", "sadness": "sadness",
+    "angry": "anger", "anger": "anger",
+    "disgusted": "disgust", "disgust": "disgust",
+    "surprised": "surprise", "surprise": "surprise",
+    "fear": "fear", "neutral": "neutral", "calm": "neutral",
+    "contempt": "contempt",
+}
+
+
+def canonical_label(label: str | None) -> str | None:
+    if not label:
+        return None
+    s = label.strip().lower()
+    return ALIASES.get(s, s)
 
 
 def list_videos(path: Path) -> list[Path]:
     if path.is_file():
         return [path]
     exts = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".flv", ".m4v"}
-    return sorted(p for p in path.rglob("*") if p.suffix.lower() in exts and p.is_file())
+    return sorted(p for p in path.rglob("*") if p.is_file() and p.suffix.lower() in exts)
 
 
 def load_label_map(path: str | None) -> dict[str, str]:
-    if not path:
-        return {}
     out: dict[str, str] = {}
-    with open(path) as fh:
-        for raw in fh:
-            line = raw.strip()
-            if not line or line.startswith("#"):
-                continue
-            parts = line.split()
-            if len(parts) < 2:
-                continue
-            out[parts[0]] = " ".join(parts[1:])
+    if not path:
+        return out
+    for raw in Path(path).read_text(encoding="utf-8").splitlines():
+        s = raw.strip()
+        if not s or s.startswith("#"):
+            continue
+        parts = s.split(maxsplit=1)
+        if len(parts) == 2:
+            out[parts[0]] = parts[1]
     return out
 
 
-def sample_frames(video_path: Path, num_segments: int) -> list[Image.Image]:
-    """Uniformly sample `num_segments` PIL frames from a video."""
-    import cv2
-    cap = cv2.VideoCapture(str(video_path))
+def sample_frames(path: Path, nseg: int) -> list[Image.Image]:
+    cap = cv2.VideoCapture(str(path))
     if not cap.isOpened():
-        raise RuntimeError(f"failed to open video: {video_path}")
-    n_total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    if n_total <= 0:
-        # Fallback: read until EOF, counting
+        raise RuntimeError(f"failed to open video: {path}")
+    n = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    if n <= 0:
+        raw = []
+        while True:
+            ok, bgr = cap.read()
+            if not ok:
+                break
+            raw.append(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
         cap.release()
-        return _read_all_frames(video_path, num_segments)
-    if n_total >= num_segments:
-        tick = (n_total) / float(num_segments)
-        indices = [int(tick / 2.0 + tick * x) for x in range(num_segments)]
+        if not raw:
+            raise RuntimeError(f"empty video: {path}")
+        ids = np.linspace(0, len(raw) - 1, nseg).astype(int)
+        return [Image.fromarray(raw[i]) for i in ids]
+    tick = n / float(nseg)
+    if n >= nseg:
+        ids = [min(n - 1, int(tick / 2.0 + tick * x)) for x in range(nseg)]
     else:
-        indices = list(range(n_total)) + [n_total - 1] * (num_segments - n_total)
-    frames: list[Image.Image] = []
-    for i in indices:
-        cap.set(cv2.CAP_PROP_POS_FRAMES, i)
+        ids = list(range(n)) + [n - 1] * (nseg - n)
+    frames = []
+    for idx in ids:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
         ok, bgr = cap.read()
         if not ok:
-            bgr = np.zeros((224, 224, 3), dtype=np.uint8)
-        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-        frames.append(Image.fromarray(rgb))
+            raise RuntimeError(f"failed to decode frame {idx}: {path}")
+        frames.append(Image.fromarray(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)))
     cap.release()
     return frames
 
 
-def _read_all_frames(video_path: Path, num_segments: int) -> list[Image.Image]:
-    """Last-resort: read every frame and pick evenly spaced ones."""
-    import cv2
-    cap = cv2.VideoCapture(str(video_path))
-    all_frames: list[np.ndarray] = []
-    while True:
-        ok, bgr = cap.read()
-        if not ok:
-            break
-        all_frames.append(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
-    cap.release()
-    n = len(all_frames)
-    if n == 0:
-        return [Image.fromarray(np.zeros((224, 224, 3), dtype=np.uint8))] * num_segments
-    indices = np.linspace(0, n - 1, num_segments).astype(int).tolist()
-    return [Image.fromarray(all_frames[i]) for i in indices]
+def transform_frames(frames: list[Image.Image], size: int = 224) -> torch.Tensor:
+    # Use the bundled upstream transforms verbatim.  In particular,
+    # torchvision Resize(int) semantics are preserved instead of replacing it
+    # with an ad-hoc square resize.
+    resized = GroupResize(size)(frames)
+    stacked = Stack()(resized)
+    tensor = ToTorchFormatTensor()(stacked)
+    try:
+        return torch.reshape(tensor, (-1, 3, size, size))
+    except RuntimeError as exc:
+        raise RuntimeError(
+            "DFER-CLIP expects the same square face-frame geometry as its official DFEW loader; "
+            f"post-resize tensor shape is {tuple(tensor.shape)}"
+        ) from exc
 
 
-def transform_frames(frames: list[Image.Image], image_size: int = 224) -> torch.Tensor:
-    """Apply the same GroupResize -> Stack -> ToTorchFormatTensor as test_data_loader."""
-    resized = [f.resize((image_size, image_size), Image.BILINEAR) for f in frames]
-    arr = np.concatenate(resized, axis=2)  # H, W, T*3
-    tensor = torch.from_numpy(arr).permute(2, 0, 1).contiguous()  # T*3, H, W
-    tensor = tensor.to(torch.float32).div_(255.0)
-    tensor = tensor.view(-1, 3, image_size, image_size)  # T, 3, H, W
-    return tensor
+class ModelArgs:
+    contexts_number = 8
+    class_token_position = "end"
+    class_specific_contexts = "True"
+    load_and_tune_prompt_learner = "False"
+    temporal_layers = 1
 
 
-def build_args(args) -> Any:
-    """Construct the argparse Namespace expected by GenerateModel / PromptLearner."""
-    class Args:
-        contexts_number = 8
-        class_token_position = "end"
-        class_specific_contexts = "True"
-        load_and_tune_prompt_learner = "False"
-        temporal_layers = 1
-    return Args()
-
-
-def load_model(clip_weights: str, dfer_weights: str, device: torch.device) -> GenerateModel:
-    """Initialise DFER-CLIP model and load the fold-1 checkpoint."""
+def load_model(clip_weights: str, dfer_weights: str, device: torch.device):
     if not Path(clip_weights).is_file():
-        raise FileNotFoundError(f"CLIP weights not found: {clip_weights}")
+        raise FileNotFoundError(f"CLIP ViT-B/32 weights not found: {clip_weights}")
     if not Path(dfer_weights).is_file():
         raise FileNotFoundError(f"DFER-CLIP checkpoint not found: {dfer_weights}")
-
-    # `clip.load` will look for `clip_weights` either as a path or download from OpenAI.
-    clip_model, _ = clip.load(clip_weights, device="cpu", download_root=os.path.dirname(clip_weights))
-
-    class_names = DFEW_DESCRIPTORS
-    args = build_args(None)
-    model = GenerateModel(input_text=class_names, clip_model=clip_model, args=args).to(device)
-
+    clip_model, _ = clip.load(clip_weights, device="cpu", download_root=str(Path(clip_weights).parent))
+    model = GenerateModel(input_text=DFEW_DESCRIPTORS, clip_model=clip_model, args=ModelArgs()).to(device)
     ckpt = torch.load(dfer_weights, map_location="cpu")
     state = ckpt.get("state_dict", ckpt)
-    # strip the "module." prefix from DataParallel if present in the ckpt
-    cleaned = {}
-    for k, v in state.items():
-        cleaned[k.replace("module.", "", 1) if k.startswith("module.") else k] = v
-    missing, unexpected = model.load_state_dict(cleaned, strict=False)
-    if unexpected:
-        sys.stderr.write(f"[warn] unexpected keys when loading DFER-CLIP ckpt: "
-                         f"{unexpected[:5]} (n_unexpected={len(unexpected)})\n")
-    if missing:
-        sys.stderr.write(f"[warn] missing keys when loading DFER-CLIP ckpt: "
-                         f"{missing[:5]} (n_missing={len(missing)})\n")
-
-    # Wrap with DataParallel AFTER weights are loaded — matches training-time
-    # behaviour, and is required for the checkpoint's `module.*` keys to land
-    # in the right place.
-    model = torch.nn.DataParallel(model)
+    state = {(k[7:] if k.startswith("module.") else k): v for k, v in state.items()}
+    # Official main.py loads the saved model state strictly.  Training wraps
+    # GenerateModel in DataParallel, so only the `module.` prefix is removed.
+    model.load_state_dict(state, strict=True)
     model.eval()
     return model
 
 
 @torch.no_grad()
-def predict_video(model, video_path: Path, num_segments: int, device: torch.device) -> dict[str, Any]:
-    """Run DFER-CLIP on a single video, return per-class probabilities + argmax."""
-    frames = sample_frames(video_path, num_segments)
-    tensor = transform_frames(frames).unsqueeze(0).to(device)  # 1, T, 3, 224, 224
-    tensor = tensor.to(torch.float32)
-
-    # DFER-CLIP casts to clip dtype internally; mimic by moving with model's dtype.
-    # The model expects image features through CLIP's visual encoder.
-    logits = model(tensor)  # 1, num_classes
-    probs = F.softmax(logits, dim=-1).squeeze(0).cpu().numpy()
-    pred_idx = int(np.argmax(probs))
+def predict(model, path: Path, nseg: int, device: torch.device) -> dict[str, Any]:
+    x = transform_frames(sample_frames(path, nseg)).unsqueeze(0).to(device)
+    logits = model(x)
+    probs = F.softmax(logits, dim=-1).squeeze(0).detach().cpu().numpy()
+    idx = int(np.argmax(probs))
     return {
-        "pred_idx": pred_idx,
-        "pred_emotion": DFEW_CLASSES[pred_idx],
-        "probs": {c: round(float(p), 4) for c, p in zip(DFEW_CLASSES, probs)},
+        "prediction": DFEW_CLASSES[idx],
+        "probs": {c: float(p) for c, p in zip(DFEW_CLASSES, probs)},
     }
 
 
-def main():
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--video", type=str, help="Path to a single video file")
-    p.add_argument("--video_dir", type=str, help="Path to a directory of videos")
-    p.add_argument("--label_file", type=str,
-                   help="Optional `<stem> <label>` per line for batch eval")
-    p.add_argument("--label", type=str, help="Optional GT label for --video mode")
-    p.add_argument("--clip_weights", type=str,
-                   default=str(THIS_DIR / "weights" / "ViT-B-32.pt"),
-                   help="Path to OpenAI CLIP ViT-B/32 weights (default: ./weights/ViT-B-32.pt)")
-    p.add_argument("--dfer_weights", type=str,
-                   default=str(THIS_DIR / "weights" / "DFEW_fold1.pth"),
-                   help="Path to DFER-CLIP DFEW fold-1 checkpoint")
-    p.add_argument("--device", type=str, default="cuda",
-                   help="Torch device, e.g. cuda:0, cpu (default: cuda)")
-    p.add_argument("--num_segments", type=int, default=16,
-                   help="Frames sampled per video (must match checkpoint training; default: 16)")
-    p.add_argument("--output", type=str, default=None,
-                   help="Optional path to write JSON results")
-    p.add_argument("--quiet", action="store_true", help="Suppress per-video progress output")
-    args = p.parse_args()
+def parse_args():
+    p = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    src = p.add_mutually_exclusive_group(required=True)
+    src.add_argument("--video")
+    src.add_argument("--video_dir")
+    p.add_argument("--label")
+    p.add_argument("--label_file")
+    p.add_argument("--clip_weights", default=str(THIS_DIR / "weights" / "ViT-B-32.pt"))
+    p.add_argument("--dfer_weights", default=str(THIS_DIR / "weights" / "DFEW_fold1.pth"))
+    p.add_argument("--device", default="cuda")
+    p.add_argument("--num_segments", type=int, default=16)
+    p.add_argument("--output")
+    p.add_argument("--quiet", action="store_true")
+    return p.parse_args()
 
-    if not args.video and not args.video_dir:
-        p.error("Provide --video <path> or --video_dir <dir>")
 
-    if args.video:
-        video_paths = [Path(args.video)]
-        label_map = {video_paths[0].stem: args.label} if args.label else {}
-    else:
-        video_paths = list_videos(Path(args.video_dir))
-        label_map = load_label_map(args.label_file)
-    if not video_paths:
-        sys.stderr.write("ERROR: no videos found\n")
-        sys.exit(2)
-
-    device = torch.device(args.device if torch.cuda.is_available() or args.device == "cpu" else "cpu")
-    if device.type == "cuda" and not torch.cuda.is_available():
-        sys.stderr.write("WARNING: cuda requested but not available, falling back to cpu\n")
-        device = torch.device("cpu")
-
-    print(f"[DFER-CLIP] loading model on {device} (num_segments={args.num_segments})", flush=True)
+def main() -> int:
+    args = parse_args()
+    paths = [Path(args.video)] if args.video else list_videos(Path(args.video_dir))
+    if not paths:
+        print("ERROR: no videos found", file=sys.stderr); return 2
+    labels = load_label_map(args.label_file)
+    if args.video and args.label:
+        labels[paths[0].stem] = args.label
+    device = torch.device(args.device if args.device == "cpu" or torch.cuda.is_available() else "cpu")
     model = load_model(args.clip_weights, args.dfer_weights, device)
 
-    results: list[dict] = []
-    n_correct = 0
-    n_labelled = 0
-    for i, vp in enumerate(video_paths, 1):
-        lbl = label_map.get(vp.stem)
-        try:
-            r = predict_video(model, vp, args.num_segments, device)
-        except Exception as exc:
-            print(f"  !! failed on {vp}: {exc}", file=sys.stderr)
-            r = {"pred_emotion": None, "probs": {}, "error": str(exc)}
-        r_out = {
-            "video": str(vp),
-            "label": lbl,
-            "prediction": r.get("pred_emotion"),
-            "probs": r.get("probs", {}),
-        }
-        if lbl is not None and r.get("pred_emotion") is not None:
-            r_out["correct"] = (lbl.lower() == r["pred_emotion"].lower())
-            if r_out["correct"]:
-                n_correct += 1
-            n_labelled += 1
+    results = []
+    supported_labelled = 0
+    correct = 0
+    for i, vp in enumerate(paths, 1):
         if not args.quiet:
-            print(f"[{i}/{len(video_paths)}] {vp.name} -> {r.get('pred_emotion')!r} "
-                  f"probs={r.get('probs', {})} correct={r_out.get('correct')}", flush=True)
-        results.append(r_out)
+            print(f"[DFER-CLIP] [{i}/{len(paths)}] {vp}")
+        label = canonical_label(labels.get(vp.stem))
+        supported = label is None or label in DFEW_CLASSES
+        try:
+            pred = predict(model, vp, args.num_segments, device)
+            row = {"video": str(vp), "label": label, "label_supported": supported, **pred}
+            if label is not None:
+                if supported:
+                    row["correct"] = pred["prediction"] == label
+                    row["target_probability"] = pred["probs"].get(label)
+                    supported_labelled += 1
+                    correct += int(row["correct"])
+                else:
+                    row["correct"] = None
+                    row["target_probability"] = None
+                    row["unsupported_reason"] = f"{label!r} is not a DFEW/DFER-CLIP class"
+            results.append(row)
+        except Exception as exc:
+            results.append({"video": str(vp), "label": label, "label_supported": supported,
+                            "prediction": None, "probs": {}, "correct": None,
+                            "error": f"{type(exc).__name__}: {exc}"})
 
-    overall = {
-        "model": "DFER-CLIP/DFEW_fold1",
-        "device": str(device),
+    payload = {
+        "model": "DFER-CLIP DFEW fold-1",
+        "classes": DFEW_CLASSES,
         "num_segments": args.num_segments,
         "n_videos": len(results),
-        "n_labelled": n_labelled,
-        "n_correct": n_correct,
-        "accuracy": round(n_correct / n_labelled, 4) if n_labelled else None,
+        "n_labelled_supported": supported_labelled,
+        "n_correct": correct,
+        "accuracy": (correct / supported_labelled) if supported_labelled else None,
+        "unsupported_labels": sorted({r["label"] for r in results if r.get("label") and not r.get("label_supported")}),
         "results": results,
     }
+    text = json.dumps(payload, indent=2, ensure_ascii=False)
     if args.output:
-        with open(args.output, "w") as fh:
-            json.dump(overall, fh, indent=2)
-        print(f"[DFER-CLIP] wrote {args.output}")
-    else:
-        print(json.dumps(overall, indent=2))
+        Path(args.output).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.output).write_text(text, encoding="utf-8")
+    if not args.quiet:
+        print(text)
+    return 0 if all("error" not in r for r in results) else 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
