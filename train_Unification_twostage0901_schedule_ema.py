@@ -1203,7 +1203,7 @@ def build_parser():
     parser.add_argument("--mode", type=str, default="train", choices=["train"])
     parser.add_argument("--exp_name", type=str, default=DEFAULT_EXP_NAME)
     parser.add_argument("--model_variant", type=str, default="jianhua0803")
-    parser.add_argument("--device_id", type=int, default=5)
+    parser.add_argument("--device_id", type=int, default=1)
     parser.add_argument("--seed", type=int, default=2026)
     parser.add_argument("--resume_checkpoint", type=Path, default=None)
 
@@ -1239,7 +1239,7 @@ def build_parser():
         choices=["error", "keep_first", "keep_last"],
     )
 
-    parser.add_argument("--batch_size", type=int, default=128)
+    parser.add_argument("--batch_size", type=int, default=80)
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--crop_strategy", type=str, default="random")
     parser.add_argument(

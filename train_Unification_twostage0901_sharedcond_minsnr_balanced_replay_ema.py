@@ -1238,7 +1238,7 @@ def build_parser():
         choices=["error", "keep_first", "keep_last"],
     )
 
-    parser.add_argument("--batch_size", type=int, default=128)
+    parser.add_argument("--batch_size", type=int, default=80)
     parser.add_argument("--num_workers", type=int, default=4)
     parser.add_argument("--crop_strategy", type=str, default="random")
     parser.add_argument(
