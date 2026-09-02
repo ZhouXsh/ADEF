@@ -8,6 +8,7 @@
 
 import argparse
 import copy
+import gc
 from collections import Counter, defaultdict, deque
 from pathlib import Path
 
@@ -505,6 +506,21 @@ class AlternatingBatchStream:
         self.counter += 1
         return batch, is_starting_sample
 
+    def close(self):
+        """Shut down both persistent DataLoader worker pools immediately."""
+        for iterator_name in ("random_iterator", "start_iterator"):
+            iterator = getattr(self, iterator_name, None)
+            if iterator is not None:
+                shutdown = getattr(iterator, "_shutdown_workers", None)
+                if shutdown is not None:
+                    try:
+                        shutdown()
+                    except Exception:
+                        pass
+                setattr(self, iterator_name, None)
+        self.random_loader = None
+        self.start_loader = None
+
 
 class ContinuationBatchStream:
     """Random 80-frame continuation samples for optional generic replay."""
@@ -519,6 +535,30 @@ class ContinuationBatchStream:
     def __next__(self):
         batch, self.iterator = _next_restart(self.loader, self.iterator)
         return batch
+
+    def close(self):
+        iterator = getattr(self, "iterator", None)
+        if iterator is not None:
+            shutdown = getattr(iterator, "_shutdown_workers", None)
+            if shutdown is not None:
+                try:
+                    shutdown()
+                except Exception:
+                    pass
+        self.iterator = None
+        self.loader = None
+
+
+def _release_dataset_storage(dataset):
+    """Free a finished stage's large in-memory motion dictionary."""
+    if dataset is None:
+        return
+    motion_data = getattr(dataset, "motion_data", None)
+    if isinstance(motion_data, dict):
+        motion_data.clear()
+    if hasattr(dataset, "all_data"):
+        dataset.all_data = []
+    gc.collect()
 
 
 def _mead_group_key(metadata):
@@ -822,28 +862,19 @@ def train(args, model, generic_dataset, mead_dataset, optimizer, save_dir,
         )
         logging.info("MEAD emotion-level group counts: %s", dict(group_counts))
 
-    generic_stream = AlternatingBatchStream(
-        generic_dataset,
-        args.batch_size,
-        args.num_workers,
-        args.seed + 11,
-        start_interval=args.start_interval,
-    )
-    mead_stream = AlternatingBatchStream(
-        mead_dataset,
-        args.batch_size,
-        args.num_workers,
-        args.seed + 31,
-        start_interval=args.start_interval,
-        sample_weights=mead_weights,
-    )
+    # Keep only the current stage's persistent worker pool alive.
+    # Stage 1 creates Generic workers only. MEAD workers are created lazily on
+    # the first MEAD iteration (190001 with the default schedule).
+    generic_stream = None
+    mead_stream = None
     generic_replay_stream = None
-    if args.generic_replay_interval > 0:
-        generic_replay_stream = ContinuationBatchStream(
+    if start_iter < args.stage1_iter:
+        generic_stream = AlternatingBatchStream(
             generic_dataset,
             args.batch_size,
             args.num_workers,
-            args.seed + 71,
+            args.seed + 11,
+            start_interval=args.start_interval,
         )
 
     audio_unit = mead_dataset.audio_unit
@@ -923,6 +954,14 @@ def train(args, model, generic_dataset, mead_dataset, optimizer, save_dir,
         )
 
         if phase == 1:
+            if generic_stream is None:
+                generic_stream = AlternatingBatchStream(
+                    generic_dataset,
+                    args.batch_size,
+                    args.num_workers,
+                    args.seed + 11,
+                    start_interval=args.start_interval,
+                )
             (audio, coef_dict), is_starting_sample = next(generic_stream)
             batch_size = audio.shape[0]
             emo_index = torch.zeros(batch_size, dtype=torch.long)
@@ -930,7 +969,12 @@ def train(args, model, generic_dataset, mead_dataset, optimizer, save_dir,
             data_name = "generic"
         elif is_generic_replay:
             if generic_replay_stream is None:
-                raise RuntimeError("generic replay stream was not initialized")
+                generic_replay_stream = ContinuationBatchStream(
+                    generic_dataset,
+                    args.batch_size,
+                    args.num_workers,
+                    args.seed + 71,
+                )
             audio, coef_dict = next(generic_replay_stream)
             batch_size = audio.shape[0]
             emo_index = torch.full(
@@ -941,6 +985,15 @@ def train(args, model, generic_dataset, mead_dataset, optimizer, save_dir,
             use_emotion_loss = False
             data_name = "generic_replay"
         else:
+            if mead_stream is None:
+                mead_stream = AlternatingBatchStream(
+                    mead_dataset,
+                    args.batch_size,
+                    args.num_workers,
+                    args.seed + 31,
+                    start_interval=args.start_interval,
+                    sample_weights=mead_weights,
+                )
             (audio, coef_dict, emo_index, _), is_starting_sample = next(mead_stream)
             use_emotion_loss = True
             data_name = "mead"
@@ -1110,40 +1163,20 @@ def train(args, model, generic_dataset, mead_dataset, optimizer, save_dir,
             for key, value in lr_dict.items():
                 writer.add_scalar(f"opt/lr_{key}", value, iteration)
 
-        should_validate = (
-            phase > 1
-            and args.val_iter > 0
-            and (iteration % args.val_iter == 0 or iteration == args.max_iter)
-        )
-        if should_validate:
-            validation_model = ema_model if ema_model is not None else model
-            val_metrics = evaluate(
-                args,
-                validation_model,
-                classifier,
-                continuation_val_loader,
-                start_val_loader,
-            )
-            logging.info(
-                "Validation at %d: total=%.6f primary=%.6f exp=%.6f emo=%.6f",
-                iteration,
-                val_metrics["total"],
-                val_metrics["primary"],
-                val_metrics["expression"],
-                val_metrics["emotion"],
-            )
-            for key, value in val_metrics.items():
-                writer.add_scalar(f"val/{key}_loss", value, iteration)
+        # The Stage-1 boundary saves two large checkpoints. Before those writes,
+        # terminate Generic workers and release Generic storage if this variant
+        # will not use Generic replay later. This avoids carrying Stage-1 RAM
+        # into the MEAD phase and avoids a boundary memory spike.
+        if iteration == args.stage1_iter and generic_stream is not None:
+            logging.info("Closing Generic workers before Stage-1 checkpoint save")
+            generic_stream.close()
+            generic_stream = None
+            if args.generic_replay_interval <= 0:
+                _release_dataset_storage(generic_dataset)
+            gc.collect()
 
-            if val_metrics["total"] < best_val:
-                best_val = val_metrics["total"]
-                torch.save(
-                    _checkpoint_payload(
-                        args, model, ema_model, iteration, phase,
-                        best_val, ema_updates,
-                    ),
-                    save_dir / "best.pt",
-                )
+        # Validation is intentionally disabled for these throughput experiments.
+        # No validation DataLoader is constructed and no evaluate() pass is run.
 
         should_save = (
             iteration % args.save_iter == 0
@@ -1178,6 +1211,10 @@ def train(args, model, generic_dataset, mead_dataset, optimizer, save_dir,
                 save_dir / "latest_train_state.pt",
             )
 
+    for stream in (generic_stream, mead_stream, generic_replay_stream):
+        if stream is not None:
+            stream.close()
+    gc.collect()
     return best_val, ema_updates
 
 
@@ -1464,20 +1501,11 @@ def main(args, option_text=None):
         crop_strategy=args.crop_strategy,
         normalize_type=args.normalize_type,
     )
-    mead_val_dataset = EmoLevelDataset(
-        args.data_root,
-        motion_filename=args.motion_filename,
-        motion_template_filename=args.motion_template_filename,
-        split="test",
-        coef_fps=args.fps,
-        n_motions=args.n_motions,
-        n_prev_motions=args.n_prev_motions,
-        crop_strategy="begin",
-        normalize_type=args.normalize_type,
-    )
-    continuation_val_loader, start_val_loader = build_validation_loaders(
-        mead_val_dataset, args.val_batch_size
-    )
+    # Validation is disabled for the 0901 performance runs. Keeping these as
+    # None preserves the train() call signature without loading a second MEAD
+    # split or constructing any validation DataLoader.
+    continuation_val_loader = None
+    start_val_loader = None
 
     classifier = Classifier().to(device)
     classifier.load_state_dict(
