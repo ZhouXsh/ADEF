@@ -10,7 +10,7 @@
 | LSE-D ↓ / LSE-C ↑ | ↓ / ↑ | 25 fps → S3FD face track/crop → SyncNet-v2 | Wav2Lip `evaluation/scores_LSE` + `joonson/syncnet_python` | 每视频评分后，对完整测试集求均值 |
 | FID ↓ | ↓ | 所有 GT 视频帧汇成一个 real set；所有生成帧汇成一个 fake set；调用 `pytorch-fid` 一次 | Wav2Lip evaluation README + `mseitzer/pytorch-fid` | **数据集级一次计算** |
 | FVD ↓ | ↓ | 每视频均匀采样固定帧数 → Google I3D → 两个完整视频分布的 Fréchet distance | `google-research/google-research/frechet_video_distance` | **数据集级一次计算** |
-| PSNR ↑ / SSIM ↑ | ↑ | 与 EAT 官方相同的 temporal linspace pairing 和 `utils_crop.crop_and_align` | `yuangan/evaluation_eat` commit `80173b2...` | 有效对齐帧全局均值 |
+| PSNR ↑ / SSIM ↑ | ↑ | 与 EAT 官方相同的 temporal linspace pairing 和 `utils_crop.crop_and_align` | `yuangan/evaluation_eat` | 有效对齐帧全局均值 |
 | LPIPS ↓ | ↓ | 与 PSNR/SSIM 相同的 EAT 对齐帧对；官方 `lpips` AlexNet | `richzhang/PerceptualSimilarity` / `lpips` | 有效对齐帧全局均值 |
 | M-LMD ↓ / F-LMD ↓ | ↓ | EAT 官方 dlib-68：嘴部 20 点 / 全脸 68 点，分别去中心后逐点 L2 | `yuangan/evaluation_eat/code/test_lmd.py` | 先每视频均值，再对视频均值 |
 | EmotiEff-Acc ↑ | ↑ | MTCNN 检出人脸后，EmotiEffLib 8 类视频主导情感与目标标签比较 | `sb-ai-lab/EmotiEffLib` | 8 类视频 accuracy |
@@ -58,7 +58,7 @@ python eval/paper_evaluator.py \
 - `paper_table.csv`：论文主表的一行；
 - `paper_metrics.json`：完整协议、错误、原始聚合信息；
 - `per_video.csv`：LSE / paired metrics / emotion prediction 的逐视频审计记录；
-- `work/`：各官方 evaluator 的结构化中间报告。
+- `work/`：各 evaluator 的结构化中间报告。
 
 ### baseline 生成 + 统一评估
 
@@ -68,7 +68,7 @@ python eval/paper_evaluator.py \
 image,audio,gt_video[,emotion]
 ```
 
-第 4 列 emotion 现在会真正逐样本生效；省略时从 MEAD GT 路径推断。运行后所有 baseline 都交给同一个 `paper_evaluator.py`，最终合并为：
+第 4 列 emotion 会逐样本生效；省略时从 MEAD GT 路径推断。运行后所有 baseline 都交给同一个 `paper_evaluator.py`，最终合并为：
 
 ```text
 eval/RESULT/paper_table.csv
@@ -83,28 +83,49 @@ python eval/ADEF_all_evaluator.py --pairs-file /path/to/pairs.txt
 
 `ADEF_all_evaluator.py` 只把当前 v2 协议下 `Status=complete` 的实验视为 done；旧 summary 或 incomplete 行会重新评估。
 
-## 4. 可复现性
+## 4. EAT / EmoNet 目录与运行前检查
 
-首次 clone：
+当前仓库中的 `eval/evaluation_eat/` 和 `eval/emonet/` 是**直接 vendored 的普通目录**，不是 Git submodule。因此不需要、也不应该再执行 `git submodule update --init --recursive`。
 
-运行长实验前建议先检查必需 submodule / checkpoint：
+`eval/evaluation_eat/code/utils_crop.py` 保持 EAT 官方的 crop/alignment 数学流程，并仅对资源路径做稳健化：`shape_predictor_68_face_landmarks.dat` 可以放在以下任一位置：
+
+```text
+eval/evaluation_eat/code/shape_predictor_68_face_landmarks.dat
+eval/evaluation_eat/checkpoints/shape_predictor_68_face_landmarks.dat
+```
+
+模板文件必须存在：
+
+```text
+eval/evaluation_eat/code/base_68.npy
+eval/evaluation_eat/code/base_68_close.npy
+```
+
+EmoNet 当前不是 `paper_evaluator.py` 默认论文主表指标。如果要单独运行 `eval/emonet/evaluate_emotion.py`，需要官方 8 类权重：
+
+```text
+eval/emonet/pretrained/emonet_8.pth
+```
+
+正式长实验前先运行：
 
 ```bash
 python eval/check_paper_eval.py --deep-hash
 ```
 
+如果还要使用 EmoNet，则运行：
+
 ```bash
-git submodule update --init --recursive
+python eval/check_paper_eval.py --deep-hash --with-emonet
 ```
 
-本仓库固定的 gitlink 已补上来源：
+各大模型权重应按各官方仓库许可证/说明下载；脚本不会在缺权重时生成占位结果。
 
-- `eval/evaluation_eat` → `https://github.com/yuangan/evaluation_eat.git`，当前 gitlink `80173b2a3984c899dd877d2e2a74e90bcac3abca`；
-- `eval/emonet` → `https://github.com/face-analysis/emonet.git`，当前 gitlink `49eef301513686d6cfd8304682d3ba7216baf398`。
+DFER-CLIP 与 CLIP 权重放入 `eval/New_Emo/weights/`。OpenAI ViT-B/32 应使用官方 SHA256：
 
-各模型权重仍需按官方仓库许可证/说明下载；脚本不会在缺权重时生成“占位结果”。
-
-其中 EAT 的 `shape_predictor_68_face_landmarks.dat`、模板和预训练评估资产按官方 `yuangan/evaluation_eat/README.md` 下载 `code.zip` 后解压到 `eval/evaluation_eat/code/`。DFER-CLIP 与 CLIP 权重放入 `eval/New_Emo/weights/`。
+```text
+40d365715913c9da98579312b702a82c18be219cc2a73407c4526f58eba950af
+```
 
 ## 5. 论文报告注意事项
 
