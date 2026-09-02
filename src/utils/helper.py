@@ -32,10 +32,12 @@ def _resolve_motion_architecture(model_args):
         # Effective architecture of pre-fix 0803 checkpoints. The base model did
         # not receive indicator; deep/wide matrix variants hard-coded it. None of
         # the pre-fix variants propagated the learnable-PE flag.
-        use_indicator = bool(
-            feature_dim != 512 or n_layers != 8 or n_heads != 8
-        )
-        no_use_learnable_pe = True
+        use_indicator = bool(_arg(model_args, "use_indicator", True))
+        no_use_learnable_pe = bool(_arg(model_args, "no_use_learnable_pe", False))
+        # use_indicator = bool(
+        #     feature_dim != 512 or n_layers != 8 or n_heads != 8
+        # )
+        # no_use_learnable_pe = True
 
     return {
         "feature_dim": feature_dim,
@@ -51,7 +53,7 @@ def load_model(ckpt_path, model_config, device, model_type):
     if model_type != "motion_generator":
         return _legacy.load_model(ckpt_path, model_config, device, model_type)
 
-    from ..modules.emotion_dit_Unification_jianhua0803 import DitTalkingHead
+    from ..modules.emotion_dit_Unification_jianhua0803_minsnr_ema import DitTalkingHead
 
     model_data = torch.load(ckpt_path, map_location=device)
     model_args = _legacy.NullableArgs(model_data["args"])

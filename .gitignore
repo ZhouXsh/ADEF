@@ -305,6 +305,7 @@ generate.py
 # their inner git history when committing the eval code.
 /eval/**/*.git/
 
+/eval-mybak/
 # ============================================================
 # END eval/
 # ============================================================

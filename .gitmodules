@@ -1,6 +1,0 @@
-[submodule "eval/evaluation_eat"]
-	path = eval/evaluation_eat
-	url = https://github.com/yuangan/evaluation_eat.git
-[submodule "eval/emonet"]
-	path = eval/emonet
-	url = https://github.com/face-analysis/emonet.git
