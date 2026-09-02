@@ -2,10 +2,10 @@
 """Paper-grade paired image/geometry metrics for talking-head videos.
 
 PSNR/SSIM and landmark distance follow the definitions and temporal matching
-used by the official EAT evaluation repository (yuangan/evaluation_eat,
-commit 80173b2a3984c899dd877d2e2a74e90bcac3abca).  Unlike the upstream
-scripts, this wrapper accepts an explicit manifest, so correctness does not
-depend on method-specific file-name slicing or hard-coded MEAD directories.
+used by the official EAT evaluation repository (yuangan/evaluation_eat).
+Unlike the upstream scripts, this wrapper accepts an explicit manifest, so
+correctness does not depend on method-specific file-name slicing or hard-coded
+MEAD directories.
 
 LPIPS uses the official ``lpips`` package (AlexNet backbone by default) on the
 same aligned and temporally paired frames.
@@ -27,6 +27,7 @@ import numpy as np
 
 THIS_DIR = Path(__file__).resolve().parent
 EAT_CODE = THIS_DIR / "evaluation_eat" / "code"
+EAT_CHECKPOINTS = THIS_DIR / "evaluation_eat" / "checkpoints"
 sys.path.insert(0, str(THIS_DIR))
 from paper_protocol import PROTOCOL_VERSION, read_manifest, summarize  # noqa: E402
 
@@ -60,14 +61,26 @@ def _temporal_pairs(fake: list[np.ndarray], gt: list[np.ndarray]):
     return [(fake[int(a)], gt[int(b)]) for a, b in zip(fi, gi)]
 
 
+def _resolve_lmd_predictor(explicit: str | None = None) -> Path:
+    if explicit:
+        return Path(explicit)
+    candidates = [
+        EAT_CODE / "shape_predictor_68_face_landmarks.dat",
+        EAT_CHECKPOINTS / "shape_predictor_68_face_landmarks.dat",
+    ]
+    for path in candidates:
+        if path.is_file():
+            return path
+    return candidates[0]
+
+
 def _load_eat_cropper():
     path = EAT_CODE / "utils_crop.py"
     if not path.is_file():
         raise FileNotFoundError(
-            f"EAT official submodule is not initialised: {path}. "
-            "Run `git submodule update --init --recursive`."
+            f"EAT crop/alignment helper is missing: {path}. "
+            "Restore eval/evaluation_eat/code/utils_crop.py from yuangan/evaluation_eat."
         )
-    # Import by file path so the wrapper is independent of cwd.
     spec = importlib.util.spec_from_file_location("adef_eat_utils_crop_psnr", path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"cannot import EAT cropper: {path}")
@@ -85,7 +98,8 @@ def _load_eat_cropper():
             pass
 
     def official_crop(image):
-        # Upstream loads base_68*.npy by relative path inside crop_and_align.
+        # Keep the EAT call convention while allowing the vendored helper to
+        # resolve its resources relative to its own file.
         cwd = os.getcwd()
         try:
             os.chdir(EAT_CODE)
@@ -133,7 +147,8 @@ class LandmarkMetric:
         if not predictor_path.is_file():
             raise FileNotFoundError(
                 f"EAT landmark predictor not found: {predictor_path}. "
-                "Initialise/download the official evaluation_eat assets."
+                "Place shape_predictor_68_face_landmarks.dat under "
+                "eval/evaluation_eat/code/ or eval/evaluation_eat/checkpoints/."
             )
         self.dlib = dlib
         self.face_utils = face_utils
@@ -190,7 +205,10 @@ def parse_args():
                    choices=["psnr", "ssim", "lpips", "lmd"])
     p.add_argument("--no-align", action="store_true",
                    help="Diagnostic only. Paper protocol aligns both videos with EAT cropper.")
-    p.add_argument("--lmd-predictor", default=str(EAT_CODE / "shape_predictor_68_face_landmarks.dat"))
+    p.add_argument(
+        "--lmd-predictor", default=None,
+        help="Optional dlib predictor path. By default code/ and checkpoints/ are searched.",
+    )
     p.add_argument("--lpips-net", default="alex", choices=["alex", "vgg", "squeeze"])
     p.add_argument("--device", default="cuda")
     p.add_argument("--allow-partial", action="store_true",
@@ -205,7 +223,8 @@ def main() -> int:
     t0 = time.time()
 
     cropper = None if args.no_align else _load_eat_cropper()
-    landmark = LandmarkMetric(Path(args.lmd_predictor)) if "lmd" in metrics else None
+    predictor_path = _resolve_lmd_predictor(args.lmd_predictor)
+    landmark = LandmarkMetric(predictor_path) if "lmd" in metrics else None
     lpips_ctx = _load_lpips(args.device, args.lpips_net) if "lpips" in metrics else None
 
     all_psnr: list[float] = []
@@ -301,6 +320,7 @@ def main() -> int:
             "lmd": "EAT official dlib-68 definition; per-video mean then dataset mean",
             "lpips": f"official lpips package, net={args.lpips_net}, same EAT-aligned frame pairs",
             "alignment": "none (diagnostic)" if args.no_align else "evaluation_eat/code/utils_crop.py",
+            "lmd_predictor": str(predictor_path) if "lmd" in metrics else None,
         },
         "n_samples": len(samples),
         "n_success": sum(bool(x.get("ok")) for x in per_video),
