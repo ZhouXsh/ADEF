@@ -72,7 +72,7 @@ def main() -> int:
     # in this repository. Do not require .gitmodules or nested .git metadata.
     vendored_checks = {
         "Vendored EAT source": ROOT / "evaluation_eat" / "code" / "preprocess.py",
-        "Vendored EmoNet source": ROOT / "emonet" / "emonet" / "models.py",
+        "Vendored EmoNet source": ROOT / "emonet" / "emonet" / "models" / "__init__.py",
     }
     for name, path in vendored_checks.items():
         exists = path.is_file()
