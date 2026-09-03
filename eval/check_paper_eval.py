@@ -44,7 +44,8 @@ def main() -> int:
     checks = {
         "Wav2Lip SyncNet-v2 weights": ROOT / "syncnet_python" / "data" / "syncnet_v2.model",
         "SyncNet S3FD weights": ROOT / "syncnet_python" / "detectors" / "s3fd" / "weights" / "sfd_face.pth",
-        "EAT vendored utils_crop.py": ROOT / "evaluation_eat" / "code" / "utils_crop.py",
+        "EAT preprocess crop helper": ROOT / "evaluation_eat" / "code" / "utils_crop.py",
+        "EAT PSNR/SSIM crop helper": ROOT / "evaluation_eat" / "code" / "utils_crop_psnr.py",
         "EAT base_68.npy": ROOT / "evaluation_eat" / "code" / "base_68.npy",
         "EAT base_68_close.npy": ROOT / "evaluation_eat" / "code" / "base_68_close.npy",
         "EAT dlib 68 predictor": eat_predictor,
@@ -69,9 +70,12 @@ def main() -> int:
         ok &= match
 
     # evaluation_eat and emonet are intentionally vendored as normal directories
-    # in this repository. Do not require .gitmodules or nested .git metadata.
+    # in this repository. Check the actual files used by the wrappers instead of
+    # requiring submodule metadata.
     vendored_checks = {
-        "Vendored EAT source": ROOT / "evaluation_eat" / "code" / "preprocess.py",
+        "Vendored EAT preprocess": ROOT / "evaluation_eat" / "code" / "preprocess.py",
+        "Vendored EAT PSNR/SSIM reference": ROOT / "evaluation_eat" / "code" / "test_psnr_ssim.py",
+        "Vendored EAT LMD reference": ROOT / "evaluation_eat" / "code" / "test_lmd.py",
         "Vendored EmoNet source": ROOT / "emonet" / "emonet" / "models" / "__init__.py",
     }
     for name, path in vendored_checks.items():
