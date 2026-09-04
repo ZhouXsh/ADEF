@@ -93,15 +93,23 @@ def main() -> int:
         rows.append({"name": "ViT-B/32 SHA256", "expected": VIT_B32_SHA256, "actual": got, "ok": match})
         ok &= match
 
+    eval_py = _python(DEFAULT_EVAL_PY)
+    fvd_py = _python(DEFAULT_FVD_PY)
+    lse_py = _python(DEFAULT_LSE_PY)
+    # Match paper_evaluator.py exactly: pairwise falls back to eval Python,
+    # while SyncNet run_pipeline falls back to the LSE evaluator interpreter.
+    pairwise_py = DEFAULT_PAIRWISE_PY if DEFAULT_PAIRWISE_PY.is_file() else eval_py
+    syncnet_pipeline_py = DEFAULT_SYNCNET_PIPELINE_PY if DEFAULT_SYNCNET_PIPELINE_PY.is_file() else lse_py
+
     env_checks = [
-        ("Pairwise Python imports", _python(DEFAULT_PAIRWISE_PY),
+        ("Pairwise Python imports", pairwise_py,
          ["cv2", "numpy", "skimage", "dlib", "imutils", "lpips", "torch"]),
-        ("Eval Python imports", _python(DEFAULT_EVAL_PY),
+        ("Eval Python imports", eval_py,
          ["cv2", "numpy", "torch", "PIL", "torchvision", "facenet_pytorch", "emotiefflib"]),
-        ("FVD Python imports", _python(DEFAULT_FVD_PY),
+        ("FVD Python imports", fvd_py,
          ["numpy", "tensorflow", "tensorflow_hub"]),
-        ("LSE Python imports", _python(DEFAULT_LSE_PY), ["cv2", "numpy", "torch"]),
-        ("SyncNet pipeline Python imports", _python(DEFAULT_SYNCNET_PIPELINE_PY),
+        ("LSE Python imports", lse_py, ["cv2", "numpy", "torch"]),
+        ("SyncNet pipeline Python imports", syncnet_pipeline_py,
          ["cv2", "numpy", "torch"]),
     ]
     for name, interpreter, modules in env_checks:
