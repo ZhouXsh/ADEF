@@ -1,0 +1,58 @@
+name: Apply ICASSP27 ablation refinement
+on:
+  push:
+    branches: [develop]
+    paths:
+      - '.github/workflows/apply_ablation0905_refinement.yml'
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Apply patch
+        run: python .github/refine_ablation0905.py
+      - name: Validate Python and independence
+        run: |
+          python -m py_compile src/utils/helper.py train_Ablation0905_*.py src/modules/emotion_dit_ablation0905_*.py
+          git diff --check
+          python - <<'PY'
+          from pathlib import Path
+          trains = sorted(Path('.').glob('train_Ablation0905_*.py'))
+          wrappers = sorted(p for p in Path('src/modules').glob('emotion_dit_ablation0905_*.py') if not p.stem.endswith('_legacy'))
+          legacies = sorted(Path('src/modules').glob('emotion_dit_ablation0905_*_legacy.py'))
+          assert len(trains) == 6
+          assert len(wrappers) == 6
+          assert len(legacies) == 6
+          residual = Path('src/modules/emotion_dit_ablation0905_emotion_residual_legacy.py').read_text()
+          assert 'self.emotion_residual = nn.Parameter' not in residual
+          assert residual.count('self._build_emotion_residual(emo_index)') == 2
+          helper = Path('src/utils/helper.py').read_text()
+          assert '_ABLATION_PREFIX = "emotion_dit_ablation0905_"' in helper
+          for train in trains:
+              text = train.read_text()
+              assert 'from src.modules.emotion_dit_ablation0905_' in text
+              for other in trains:
+                  if other != train:
+                      assert other.stem not in text
+          print('static checks passed')
+          PY
+      - name: Commit and remove temporary files
+        run: |
+          rm -f .github/refine_ablation0905.py
+          rm -f .github/workflows/refine_ablation0905_suite.yml
+          rm -f .github/workflows/apply_ablation0905_refinement.yml
+          git config user.name 'OpenAI Codex'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- ABLATION_ICASSP27_0905.md train_Ablation0905_emotion_residual.py src/modules/emotion_dit_ablation0905_emotion_residual_legacy.py
+          git add -u -- .github
+          git diff --cached --check
+          git commit -m 'refine parameter-matched residual ablation 0905 [skip ci]'
+          git push origin HEAD:develop
