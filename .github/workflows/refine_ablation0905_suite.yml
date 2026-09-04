@@ -1,0 +1,187 @@
+name: Refine ICASSP27 ablation suite 0905
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - '.github/workflows/refine_ablation0905_suite.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  refine:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Make residual control parameter-matched and inference-consistent
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          legacy_path = Path('src/modules/emotion_dit_ablation0905_emotion_residual_legacy.py')
+          text = legacy_path.read_text(encoding='utf-8')
+
+          parameter_block = '''
+                  # Competing factorization: category-specific motion is represented as an
+                  # additive trajectory residual on top of a category-agnostic speech path.
+                  self.emotion_residual = nn.Parameter(torch.zeros(
+                      emo_classes, self.n_prev_motions + self.n_motions, self.motion_feat_dim
+                  ))
+          '''
+          if parameter_block not in text:
+              raise RuntimeError('old free residual parameter block not found')
+          text = text.replace(parameter_block, '\n', 1)
+
+          method_anchor = '''    def extract_audio_feature(self, audio, frame_num=None):
+          '''
+          method = '''    def _build_emotion_residual(self, emo_index):
+                  """Build a category residual with the final model's existing parameters.
+
+                  The competing method keeps exactly the same trainable parameter count as
+                  ADEF: the existing emotion embedding and affine head create an emotion
+                  code, the denoiser positional encoding makes it time-varying, and the
+                  shared motion decoder maps it to the 70-D trajectory. No extra residual
+                  table or residual network is introduced.
+                  """
+                  emo_feat = self.emo_embed(emo_index).unsqueeze(1)
+                  emo_shift, emo_scale = self.adaLN_modulation(emo_feat).chunk(2, dim=2)
+                  emotion_code = emo_shift + emo_scale
+                  total_len = self.n_prev_motions + self.n_motions
+                  if self.denoising_net.use_learnable_pe:
+                      position = self.denoising_net.PE[:, :total_len]
+                  else:
+                      position = self.denoising_net.PE.pe[:, :total_len]
+                  residual_hidden = emotion_code + position.to(emotion_code.dtype)
+                  return self.denoising_net.motion_dec(residual_hidden)
+
+              def extract_audio_feature(self, audio, frame_num=None):
+          '''
+          if method_anchor not in text:
+              raise RuntimeError('extract_audio_feature anchor not found')
+          text = text.replace(method_anchor, method, 1)
+
+          count = text.count('torch.index_select(self.emotion_residual, 0, emo_index)')
+          if count != 2:
+              raise RuntimeError(f'expected two free residual lookups, found {count}')
+          text = text.replace(
+              'torch.index_select(self.emotion_residual, 0, emo_index)',
+              'self._build_emotion_residual(emo_index)',
+          )
+
+          # The speech base must remain category-agnostic during sampling as it is
+          # during training; target category enters only through the residual.
+          sample_pos = text.index('    @torch.no_grad()\n    def sample(')
+          prefix, sample = text[:sample_pos], text[sample_pos:]
+          old_motion = 'prev_motion_feat = torch.index_select(self.start_motion_feat, 0, emo_index)'
+          old_audio = 'prev_audio_feat = torch.index_select(self.start_audio_feat, 0, emo_index)'
+          if old_motion not in sample or old_audio not in sample:
+              raise RuntimeError('sample start-prior lookup not found')
+          sample = sample.replace(
+              old_motion,
+              'prev_motion_feat = self.start_motion_feat[0:1].expand(batch_size, -1, -1)',
+              1,
+          )
+          sample = sample.replace(
+              old_audio,
+              'prev_audio_feat = self.start_audio_feat[0:1].expand(batch_size, -1, -1)',
+              1,
+          )
+          legacy_path.write_text(prefix + sample, encoding='utf-8')
+
+          train_path = Path('train_Ablation0905_emotion_residual.py')
+          train = train_path.read_text(encoding='utf-8')
+          train = train.replace('    "emotion_residual",\n', '', 1)
+          init_block = '''        if hasattr(model, "emotion_residual"):
+                      model.emotion_residual.zero_()
+          '''
+          sync_block = '''        if hasattr(model, "emotion_residual"):
+                      model.emotion_residual[1:].copy_(
+                          model.emotion_residual[0:1].expand_as(model.emotion_residual[1:])
+                      )
+          '''
+          if init_block not in train or sync_block not in train:
+              raise RuntimeError('residual-specific train initialization blocks not found')
+          train = train.replace(init_block, '', 1).replace(sync_block, '', 1)
+          train_path.write_text(train, encoding='utf-8')
+          PY
+
+      - name: Strengthen ablation documentation
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('ABLATION_ICASSP27_0905.md')
+          text = p.read_text(encoding='utf-8')
+          old = '''After re-checking the paper claims, only six additional controlled runs are necessary. The existing 6006/6008/6007/6010/6009 runs already isolate shared-prior warm-start, balanced MEAD sampling, and Min-SNR. Generic replay (6011) is diagnostic and is not part of the final method. Radius-0/global attention is not a headline contribution (the manuscript explicitly treats the local/global temporal design as architectural context), so it should not consume main ablation budget unless reviewers request it.
+          '''
+          new = '''After re-checking the paper claims, only six additional controlled runs are necessary. The existing 6006/6008/6007/6010/6009 runs already isolate shared-prior warm-start, balanced MEAD sampling, and Min-SNR. Generic replay (6011) is diagnostic and is not part of the final method. Radius-0/global attention is not a headline contribution (the manuscript explicitly treats the local/global temporal design as architectural context), so it should not consume main ablation budget unless reviewers request it.
+
+Two originally drafted rows are intentionally not duplicated here. **Audio-only** should be reported as the controlled KDTalker-style baseline rather than as another ADEF ablation. **Late label concatenation** is omitted from the minimum suite because it changes the denoiser input projection/capacity and is less clean than the same-parameter additive and DiT-internal controls. If the manuscript retains a claim that late concatenation was tested, that row must either be implemented separately or removed from the claim/table before submission.
+          '''
+          if old not in text:
+              raise RuntimeError('documentation rationale anchor not found')
+          text = text.replace(old, new, 1)
+          old_residual = '''- `emotion_residual`: target emotion is represented as a category-specific additive 80x70 motion residual on top of a category-agnostic speech trajectory. It cannot alter the speech generator through acoustic FiLM, so it is a direct residual-composition alternative.
+          '''
+          new_residual = '''- `emotion_residual`: target emotion is represented as an additive 80x70 motion residual on top of a category-agnostic speech trajectory. The residual reuses the final model's existing emotion embedding, affine head, positional encoding, and shared motion decoder, so **no new trainable parameters are added**. It cannot alter the speech generator through acoustic FiLM, making it an exact-parameter-count residual-composition alternative.
+          '''
+          if old_residual not in text:
+              raise RuntimeError('residual documentation anchor not found')
+          text = text.replace(old_residual, new_residual, 1)
+          checkpoint = '''Each training script writes its own `variant_name` and `model_variant` into checkpoint args. Keep those fields when generating videos so a checkpoint is always loaded with its dedicated model file.
+          '''
+          checkpoint_new = checkpoint + '''
+`src/utils/helper.py` resolves the `emotion_dit_ablation0905_*` model namespace directly from checkpoint metadata and passes the partition-mask argument only to the partition model. This prevents evaluation from silently loading the final 6009 class for an ablation checkpoint.
+          '''
+          if checkpoint not in text:
+              raise RuntimeError('checkpoint documentation anchor not found')
+          text = text.replace(checkpoint, checkpoint_new, 1)
+          p.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Static validation
+        run: |
+          python -m py_compile src/utils/helper.py train_Ablation0905_*.py src/modules/emotion_dit_ablation0905_*.py
+          git diff --check
+          python - <<'PY'
+          from pathlib import Path
+          trains = sorted(Path('.').glob('train_Ablation0905_*.py'))
+          wrappers = sorted(p for p in Path('src/modules').glob('emotion_dit_ablation0905_*.py') if not p.stem.endswith('_legacy'))
+          legacies = sorted(Path('src/modules').glob('emotion_dit_ablation0905_*_legacy.py'))
+          assert len(trains) == 6, trains
+          assert len(wrappers) == 6, wrappers
+          assert len(legacies) == 6, legacies
+          residual_model = Path('src/modules/emotion_dit_ablation0905_emotion_residual_legacy.py').read_text()
+          residual_train = Path('train_Ablation0905_emotion_residual.py').read_text()
+          assert 'self.emotion_residual = nn.Parameter' not in residual_model
+          assert 'emotion_residual",' not in residual_train
+          assert 'self._build_emotion_residual(emo_index)' in residual_model
+          helper = Path('src/utils/helper.py').read_text()
+          assert '_ABLATION_PREFIX = "emotion_dit_ablation0905_"' in helper
+          for train in trains:
+              text = train.read_text()
+              assert 'from src.modules.emotion_dit_ablation0905_' in text
+              for other in trains:
+                  if other != train:
+                      assert other.stem not in text
+          print('ablation suite static validation passed')
+          PY
+
+      - name: Commit refinement and self-remove workflow
+        run: |
+          rm -f .github/workflows/refine_ablation0905_suite.yml
+          git config user.name 'OpenAI Codex'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- ABLATION_ICASSP27_0905.md train_Ablation0905_emotion_residual.py src/modules/emotion_dit_ablation0905_emotion_residual_legacy.py
+          git add -u -- .github/workflows/refine_ablation0905_suite.yml
+          git diff --cached --check
+          git commit -m 'refine parameter-matched residual ablation 0905 [skip ci]'
+          git push origin HEAD:develop
