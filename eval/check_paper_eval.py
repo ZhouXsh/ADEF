@@ -5,11 +5,18 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-
 VIT_B32_SHA256 = "40d365715913c9da98579312b702a82c18be219cc2a73407c4526f58eba950af"
+
+DEFAULT_EVAL_PY = Path("/home/Zhouxishi/miniconda3/envs/eval/bin/python")
+DEFAULT_FVD_PY = Path("/home/Zhouxishi/miniconda3/envs/fvd/bin/python")
+DEFAULT_LSE_PY = ROOT / "Wav2Lip" / "evaluation" / "venv" / "bin" / "python"
+DEFAULT_PAIRWISE_PY = ROOT / "evaluation_eat" / "venv" / "bin" / "python"
+DEFAULT_SYNCNET_PIPELINE_PY = ROOT / "syncnet_python" / "syncnet_venv" / "bin" / "python"
 
 
 def sha256(path: Path) -> str:
@@ -27,14 +34,27 @@ def _first_existing(*paths: Path) -> Path:
     return paths[0]
 
 
+def _python(preferred: Path) -> Path:
+    return preferred if preferred.is_file() else Path(sys.executable)
+
+
+def _check_imports(python: Path, modules: list[str]) -> tuple[bool, str]:
+    code = "; ".join(f"import {m}" for m in modules)
+    try:
+        proc = subprocess.run([str(python), "-c", code], capture_output=True, text=True, timeout=60)
+    except Exception as exc:
+        return False, f"{type(exc).__name__}: {exc}"
+    if proc.returncode == 0:
+        return True, ""
+    tail = (proc.stderr or proc.stdout or "").strip().splitlines()
+    return False, " | ".join(tail[-3:])
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--json", dest="json_out")
     p.add_argument("--deep-hash", action="store_true", help="verify the OpenAI ViT-B/32 SHA256")
-    p.add_argument(
-        "--with-emonet", action="store_true",
-        help="also require the optional EmoNet 8-class checkpoint",
-    )
+    p.add_argument("--with-emonet", action="store_true")
     args = p.parse_args()
 
     eat_predictor = _first_existing(
@@ -52,6 +72,10 @@ def main() -> int:
         "DFER-CLIP source": ROOT / "New_Emo" / "DFER-CLIP" / "models" / "Generate_Model.py",
         "DFER-CLIP fold-1 weights": ROOT / "New_Emo" / "weights" / "DFEW_fold1.pth",
         "OpenAI CLIP ViT-B/32": ROOT / "New_Emo" / "weights" / "ViT-B-32.pt",
+        "Vendored EAT preprocess": ROOT / "evaluation_eat" / "code" / "preprocess.py",
+        "Vendored EAT PSNR/SSIM reference": ROOT / "evaluation_eat" / "code" / "test_psnr_ssim.py",
+        "Vendored EAT LMD reference": ROOT / "evaluation_eat" / "code" / "test_lmd.py",
+        "Vendored EmoNet source": ROOT / "emonet" / "emonet" / "models" / "__init__.py",
     }
     if args.with_emonet:
         checks["EmoNet 8-class weights"] = ROOT / "emonet" / "pretrained" / "emonet_8.pth"
@@ -69,23 +93,27 @@ def main() -> int:
         rows.append({"name": "ViT-B/32 SHA256", "expected": VIT_B32_SHA256, "actual": got, "ok": match})
         ok &= match
 
-    # evaluation_eat and emonet are intentionally vendored as normal directories
-    # in this repository. Check the actual files used by the wrappers instead of
-    # requiring submodule metadata.
-    vendored_checks = {
-        "Vendored EAT preprocess": ROOT / "evaluation_eat" / "code" / "preprocess.py",
-        "Vendored EAT PSNR/SSIM reference": ROOT / "evaluation_eat" / "code" / "test_psnr_ssim.py",
-        "Vendored EAT LMD reference": ROOT / "evaluation_eat" / "code" / "test_lmd.py",
-        "Vendored EmoNet source": ROOT / "emonet" / "emonet" / "models" / "__init__.py",
-    }
-    for name, path in vendored_checks.items():
-        exists = path.is_file()
-        rows.append({"name": name, "path": str(path), "ok": exists})
-        ok &= exists
+    env_checks = [
+        ("Pairwise Python imports", _python(DEFAULT_PAIRWISE_PY),
+         ["cv2", "numpy", "skimage", "dlib", "imutils", "lpips", "torch"]),
+        ("Eval Python imports", _python(DEFAULT_EVAL_PY),
+         ["cv2", "numpy", "torch", "PIL", "torchvision", "facenet_pytorch", "emotiefflib"]),
+        ("FVD Python imports", _python(DEFAULT_FVD_PY),
+         ["numpy", "tensorflow", "tensorflow_hub"]),
+        ("LSE Python imports", _python(DEFAULT_LSE_PY), ["cv2", "numpy", "torch"]),
+        ("SyncNet pipeline Python imports", _python(DEFAULT_SYNCNET_PIPELINE_PY),
+         ["cv2", "numpy", "torch"]),
+    ]
+    for name, interpreter, modules in env_checks:
+        import_ok, detail = _check_imports(interpreter, modules)
+        rows.append({"name": name, "path": str(interpreter), "modules": modules,
+                     "detail": detail, "ok": import_ok})
+        ok &= import_ok
 
     payload = {"ok": bool(ok), "checks": rows}
     for row in rows:
-        print(f"[{'OK' if row['ok'] else 'MISSING'}] {row['name']}: {row.get('path', '')}")
+        suffix = f" ({row['detail']})" if row.get("detail") else ""
+        print(f"[{'OK' if row['ok'] else 'MISSING'}] {row['name']}: {row.get('path', '')}{suffix}")
     if args.json_out:
         Path(args.json_out).write_text(json.dumps(payload, indent=2), encoding="utf-8")
     return 0 if ok else 2
