@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Shared protocol helpers for paper-grade ADEF evaluation.
-
-The paper protocol is intentionally dataset-centric.  Fréchet metrics are
-computed once over the complete method result set; per-video metrics are
-aggregated only after every requested sample has been accounted for.
-"""
+"""Shared protocol helpers for paper-grade ADEF evaluation."""
 from __future__ import annotations
 
 import csv
@@ -14,12 +9,10 @@ import math
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Iterable, Optional, Sequence
+from typing import Any, Iterable, Optional, Sequence
 
-PROTOCOL_VERSION = "ADEF-paper-eval-v2"
+PROTOCOL_VERSION = "ADEF-paper-eval-v3"
 
-# MEAD's eight categories, normalized to semantic names used by the emotion
-# evaluators.  DFER-CLIP supports the seven non-contempt categories only.
 EMOTION_ALIASES = {
     "ang": "anger", "angry": "anger", "anger": "anger",
     "con": "contempt", "contempt": "contempt",
@@ -86,11 +79,6 @@ def infer_emotion(path: str | Path) -> Optional[str]:
 
 
 def parse_mead_meta(path: str | Path, fallback_emotion: Optional[str] = None):
-    """Return (speaker, short_emotion, level, utterance) when path is MEAD-like.
-
-    Accepted filename examples include ``M003_front_angry_level_3_001`` and
-    canonical EAT names such as ``M003_ang_3_001``.
-    """
     p = Path(path)
     stem = p.stem
     parts = re.split(r"[_\-]+", stem)
@@ -101,7 +89,6 @@ def parse_mead_meta(path: str | Path, fallback_emotion: Optional[str] = None):
     if m:
         level = m.group(1)
     else:
-        # Canonical EAT form: M003_ang_3_001
         for i, x in enumerate(parts):
             if speaker and x.lower() == speaker.lower() and i + 3 < len(parts):
                 if parts[i + 2].isdigit():
@@ -124,7 +111,6 @@ def canonical_eat_filename(sample: Sample, index: int = 0) -> str:
     if not meta:
         raise ValueError(f"Cannot derive MEAD metadata from GT path: {sample.gt}")
     speaker, emo, level, utterance = meta
-    # Mode 4 in EAT official evaluation expects: prefix_pid_emo_level_utterance.
     return f"{index:04d}_{speaker}_{emo}_{level}_{utterance}.mp4"
 
 
@@ -141,7 +127,6 @@ def _validate_sample(s: Sample, require_files: bool = True) -> Sample:
 
 
 def read_manifest(path: str | Path, require_files: bool = True) -> list[Sample]:
-    """Read CSV/TSV manifest with columns name,fake,gt[,emotion,image,audio]."""
     p = Path(path)
     if not p.is_file():
         raise FileNotFoundError(p)
@@ -188,11 +173,14 @@ def write_manifest(path: str | Path, samples: Sequence[Sample]) -> Path:
     return p
 
 
-def manifest_fingerprint(samples: Sequence[Sample], metrics: Iterable[str]) -> str:
+def manifest_fingerprint(
+    samples: Sequence[Sample], metrics: Iterable[str], context: Any | None = None
+) -> str:
     payload = {
         "protocol": PROTOCOL_VERSION,
         "metrics": sorted(set(metrics)),
         "samples": [asdict(s.normalized()) for s in samples],
+        "context": context,
     }
     raw = json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
