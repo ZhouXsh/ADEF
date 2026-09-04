@@ -4,13 +4,6 @@
 The published Wav2Lip protocol first runs joonson/syncnet_python's
 ``run_pipeline.py`` (25-fps conversion, S3FD face detection/tracking and
 224x224 face crop), then scores the resulting face track with SyncNet-v2.
-This wrapper performs exactly that sequence and produces structured JSON/CSV.
-
-For short talking-head clips we lower only the upstream track-duration gate
-(``--min-track``; default 5 detected frames).  The detector, tracker, crop,
-25-fps conversion, audio resampling, SyncNet weights and score definitions are
-otherwise the official pipeline.  Use ``--min-track 100`` to reproduce the
-original Wav2Lip real-video shell default literally.
 """
 from __future__ import annotations
 
@@ -77,8 +70,6 @@ def _video_frame_count(path: Path) -> int:
 def _select_track(track_files: list[Path]) -> Path:
     if not track_files:
         raise RuntimeError("official SyncNet face pipeline produced no face track")
-    # Talking-head clips should contain one track.  If a detector creates more,
-    # choose the longest one deterministically rather than averaging identities.
     return max(track_files, key=lambda p: (_video_frame_count(p), p.name))
 
 
@@ -112,7 +103,6 @@ class Evaluator:
         if dists.ndim != 2 or dists.shape[0] == 0:
             raise RuntimeError(f"invalid SyncNet distance matrix: {dists.shape}")
         mdist = dists.mean(axis=0)
-        # This is Wav2Lip's published `minval` / LSE-D.
         lse_d = float(mdist.min())
         return int(np.asarray(offset).item()), float(np.asarray(conf).item()), lse_d, float(dists.min()), int(dists.shape[0])
 
@@ -156,6 +146,15 @@ class Evaluator:
 
 
 def expand_inputs(args) -> list[str]:
+    # Paper evaluation maps result rows back to manifest rows by position. In
+    # file-list mode preserve exact order and duplicates instead of deduping.
+    if args.filelist:
+        return [
+            str(Path(s).expanduser().resolve())
+            for raw in Path(args.filelist).read_text().splitlines()
+            if (s := raw.strip()) and not s.startswith("#")
+        ]
+
     out: list[str] = []
     if args.video:
         out.append(args.video)
@@ -164,14 +163,13 @@ def expand_inputs(args) -> list[str]:
     if args.video_dir:
         for ext in VIDEO_EXTS:
             out.extend(glob(os.path.join(args.video_dir, "**", "*" + ext), recursive=True))
-    if args.filelist:
-        out.extend(x.strip() for x in Path(args.filelist).read_text().splitlines() if x.strip() and not x.lstrip().startswith("#"))
     seen = set()
     result = []
     for raw in out:
         p = str(Path(raw).expanduser().resolve())
         if p not in seen:
-            seen.add(p); result.append(p)
+            seen.add(p)
+            result.append(p)
     return result
 
 
@@ -195,13 +193,11 @@ def parse_args():
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     p.add_argument("--vshift", type=int, default=15)
     p.add_argument("--batch_size", type=int, default=20)
-    p.add_argument("--min-track", type=int, default=5,
-                   help="Upstream face-track duration gate; 5 supports short MEAD clips, 100 is literal Wav2Lip shell default.")
+    p.add_argument("--min-track", type=int, default=5)
     p.add_argument("--facedet-scale", type=float, default=0.25)
     p.add_argument("--crop-scale", type=float, default=0.40)
     default_pipeline_python = SYNCNET_DIR / "syncnet_venv" / "bin" / "python"
-    p.add_argument("--pipeline-python", default=str(default_pipeline_python if default_pipeline_python.is_file() else Path(sys.executable)),
-                   help="Interpreter used for official syncnet_python/run_pipeline.py")
+    p.add_argument("--pipeline-python", default=str(default_pipeline_python if default_pipeline_python.is_file() else Path(sys.executable)))
     p.add_argument("--output_json")
     p.add_argument("--output_csv")
     return p.parse_args()
@@ -251,7 +247,8 @@ def main() -> int:
     else:
         print(json.dumps(payload, indent=2, ensure_ascii=False))
     if args.output_csv:
-        path = Path(args.output_csv); path.parent.mkdir(parents=True, exist_ok=True)
+        path = Path(args.output_csv)
+        path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("w", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, fieldnames=list(asdict(results[0]).keys()))
             w.writeheader(); w.writerows(asdict(r) for r in results)
