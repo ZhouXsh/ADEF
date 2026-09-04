@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Generate baselines and evaluate them with the paper-grade ADEF protocol.
+"""Generate all baselines and evaluate them with paper protocol v3.
 
-Input rows are ``image,audio,gt_video[,emotion]``.  Emotion is per-sample;
-when omitted it is inferred from the MEAD GT path.  Every baseline is evaluated
-on the same explicit manifest by ``paper_evaluator.py``.  FID/FVD are therefore
-computed once per baseline dataset, never per video.
+Input rows: ``image,audio,gt_video[,emotion]``. A generation failure now removes
+only that sample from the affected baseline. Remaining generated samples are
+evaluated, and missing samples are propagated to paper_evaluator as upstream
+failures so the final row is partial rather than silently losing the method.
 """
 from __future__ import annotations
 
@@ -49,8 +49,10 @@ def _import_baselines():
     try:
         return importlib.import_module("run_baselines")
     finally:
-        try: sys.path.remove(str(BASELINE_RUNNER.parent))
-        except ValueError: pass
+        try:
+            sys.path.remove(str(BASELINE_RUNNER.parent))
+        except ValueError:
+            pass
 
 
 def parse_row(raw: str) -> Optional[Triple]:
@@ -61,19 +63,39 @@ def parse_row(raw: str) -> Optional[Triple]:
     if len(parts) not in (3, 4):
         raise ValueError(f"expected image,audio,gt[,emotion], got {len(parts)} columns: {raw!r}")
     image, audio, gt = parts[:3]
-    for label, p in (("image", image), ("audio", audio), ("gt", gt)):
-        if not Path(p).is_file():
-            raise FileNotFoundError(f"{label} not found: {p}")
     emo = canonical_emotion(parts[3]) if len(parts) == 4 and parts[3] else infer_emotion(gt)
     return Triple(image=image, audio=audio, gt=gt, emotion=emo)
 
 
-def read_triples(args) -> list[Triple]:
+def _sample_name(t: Triple, idx: int) -> str:
+    return f"{idx:04d}_{Path(t.gt).stem}"
+
+
+def read_triples(args) -> tuple[list[tuple[int, Triple]], list[dict], int]:
     raws = Path(args.triples_file).read_text(encoding="utf-8").splitlines() if args.triples_file else args.triples
-    out = [x for raw in raws if (x := parse_row(raw)) is not None]
-    if not out:
+    valid: list[tuple[int, Triple]] = []
+    failures: list[dict] = []
+    expected = 0
+    for raw in raws:
+        t = parse_row(raw)
+        if t is None:
+            continue
+        idx = expected
+        expected += 1
+        missing = []
+        for label, path in (("image", t.image), ("audio", t.audio), ("gt", t.gt)):
+            if not Path(path).is_file():
+                missing.append(f"{label} not found: {path}")
+        if missing:
+            failures.append({
+                "stage": "input", "name": _sample_name(t, idx), "fake": "", "gt": t.gt,
+                "error": "; ".join(missing),
+            })
+            continue
+        valid.append((idx, t))
+    if expected == 0:
         raise ValueError("no usable triples")
-    return out
+    return valid, failures, expected
 
 
 def _pair_name(rb, method: str, t: Triple, idx: int, scenario: str) -> str:
@@ -88,10 +110,12 @@ def generate_one(rb, method: str, t: Triple, idx: int, outdir: Path, scenario: s
     target = outdir / f"{name}.mp4"
     if target.is_file():
         return target
+
+    before = {p.resolve() for p in outdir.glob("*.mp4") if p.is_file()}
     fn = rb.METHODS[method]
     if method == "eat_code":
         if t.emotion is None:
-            raise ValueError("EAT requires an emotion label; add manifest emotion or use a MEAD-like GT path")
+            raise ValueError("EAT requires an emotion label; add emotion or use a MEAD-like GT path")
         full = EAT_FULL.get(t.emotion, t.emotion)
         mapped = getattr(rb, "EAT_EMO_MAP", {}).get(full, MEAD_SHORT.get(t.emotion, full))
         rc = fn(image=t.image, audio=t.audio, output_dir=str(outdir),
@@ -101,33 +125,36 @@ def generate_one(rb, method: str, t: Triple, idx: int, outdir: Path, scenario: s
                 driving_video=None, scenario=scenario, idx=idx)
     if rc not in (0, None):
         raise RuntimeError(f"{method} returned rc={rc}")
-    if not target.is_file():
-        candidates = sorted(outdir.glob("*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
-        exact = [p for p in candidates if p.stem == name]
-        if exact:
-            target = exact[0]
-        elif len(candidates) == 1:
-            target = candidates[0]
-        else:
-            raise RuntimeError(f"generation completed but expected output not found: {target}")
-    return target
+    if target.is_file():
+        return target
+
+    candidates = sorted((p for p in outdir.glob("*.mp4") if p.is_file()),
+                        key=lambda p: p.stat().st_mtime, reverse=True)
+    exact = [p for p in candidates if p.stem == name]
+    if exact:
+        return exact[0]
+    newly_created = [p for p in candidates if p.resolve() not in before]
+    if len(newly_created) == 1:
+        return newly_created[0]
+    raise RuntimeError(f"generation completed but expected output not found: {target}")
 
 
-def _run_paper(manifest: Path, method: str, outdir: Path, args) -> int:
-    # Remove previous top-level outputs before a new evaluation.  This prevents
-    # a failed rerun from leaving an old paper_table.csv that looks current.
-    for stale in ("paper_table.csv", "paper_metrics.json", "per_video.csv"):
+def _clear_outputs(outdir: Path) -> None:
+    for stale in ("paper_table.csv", "paper_metrics.json", "per_video.csv", "failed_samples.csv"):
         p = outdir / stale
         if p.is_file() or p.is_symlink():
             p.unlink()
 
+
+def _run_paper(manifest: Path, method: str, outdir: Path, expected_n: int,
+               upstream_failures: Path, args) -> int:
+    _clear_outputs(outdir)
     cmd = [sys.executable, str(PAPER_EVALUATOR), "--manifest", str(manifest),
            "--method", method, "--output-dir", str(outdir),
-           "--device", args.device, "--timeout", str(args.timeout)]
+           "--device", args.device, "--timeout", str(args.timeout),
+           "--expected-n", str(expected_n), "--upstream-failures", str(upstream_failures)]
     if args.metrics:
         cmd += ["--metrics", *args.metrics]
-    if args.allow_partial:
-        cmd.append("--allow-partial")
     return subprocess.call(cmd, cwd=str(THIS_DIR))
 
 
@@ -156,6 +183,27 @@ def _combine_tables(root: Path, methods: list[str]) -> Optional[Path]:
     return out
 
 
+def _read_method_status(method_dir: Path) -> tuple[str | None, int]:
+    table = method_dir / "paper_table.csv"
+    failed = method_dir / "failed_samples.csv"
+    status = None
+    if table.is_file():
+        try:
+            with table.open(newline="", encoding="utf-8") as f:
+                row = next(csv.DictReader(f), None)
+            status = row.get("Status") if row else None
+        except Exception:
+            pass
+    n_fail = 0
+    if failed.is_file():
+        try:
+            with failed.open(newline="", encoding="utf-8") as f:
+                n_fail = sum(1 for _ in csv.DictReader(f))
+        except Exception:
+            pass
+    return status, n_fail
+
+
 def parse_args():
     p = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     src = p.add_mutually_exclusive_group(required=True)
@@ -169,62 +217,77 @@ def parse_args():
     p.add_argument("--timeout", type=int, default=7200)
     p.add_argument("--scenario", default="paper_eval")
     p.add_argument("--generation-only", action="store_true")
-    p.add_argument("--allow-partial", action="store_true", help="diagnostic only; incomplete rows are not paper-ready")
+    p.add_argument("--allow-partial", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--dry-run", action="store_true")
     return p.parse_args()
 
 
 def main() -> int:
     args = parse_args()
-    triples = read_triples(args)
-    root = Path(args.output_root).resolve(); root.mkdir(parents=True, exist_ok=True)
-    print(f"[final-eval] samples={len(triples)} baselines={args.baselines}")
+    indexed_triples, input_failures, expected_n = read_triples(args)
+    root = Path(args.output_root).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    print(f"[final-eval] samples={expected_n} valid_inputs={len(indexed_triples)} baselines={args.baselines}")
     print("[final-eval] EAT alone receives GT-derived driving pose, matching its official method; other baselines do not.")
     if args.dry_run:
-        for i, t in enumerate(triples):
+        for i, t in indexed_triples:
             print(i, t)
+        for f in input_failures:
+            print("INPUT FAIL", f)
         return 0
 
     rb = _import_baselines()
     overall_rc = 0
     for method in args.baselines:
         method_dir = root / method
+        method_dir.mkdir(parents=True, exist_ok=True)
         generated: list[tuple[int, Triple, Path]] = []
-        failures = []
-        for i, t in enumerate(triples):
+        failures: list[dict] = list(input_failures)
+        for i, t in indexed_triples:
             try:
                 t0 = time.time()
                 fake = generate_one(rb, method, t, i, method_dir / "videos", args.scenario)
                 generated.append((i, t, fake))
-                print(f"[{method}] [{i+1}/{len(triples)}] OK {fake.name} ({time.time()-t0:.1f}s)")
+                print(f"[{method}] [{i+1}/{expected_n}] OK {fake.name} ({time.time()-t0:.1f}s)")
             except Exception as exc:
-                failures.append({"index": i, "error": f"{type(exc).__name__}: {exc}"})
-                print(f"[{method}] [{i+1}/{len(triples)}] FAIL {exc}", file=sys.stderr)
-        (method_dir / "generation_status.json").write_text(json.dumps({
-            "expected": len(triples), "generated": len(generated), "failures": failures,
-        }, indent=2, ensure_ascii=False), encoding="utf-8")
-        if failures and not args.allow_partial:
+                name = _sample_name(t, i)
+                failures.append({
+                    "stage": "generation", "name": name, "fake": "", "gt": t.gt,
+                    "error": f"{type(exc).__name__}: {exc}",
+                })
+                print(f"[{method}] [{i+1}/{expected_n}] FAIL {name}: {exc}", file=sys.stderr)
+
+        status_payload = {"expected": expected_n, "generated": len(generated), "failures": failures}
+        generation_status = method_dir / "generation_status.json"
+        generation_status.write_text(json.dumps(status_payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        upstream = method_dir / "upstream_failures.json"
+        upstream.write_text(json.dumps({"failures": failures}, indent=2, ensure_ascii=False), encoding="utf-8")
+
+        if not generated:
+            _clear_outputs(method_dir)
             overall_rc = overall_rc or 2
-            print(f"[{method}] evaluation skipped: generation coverage {len(generated)}/{len(triples)}", file=sys.stderr)
-            for stale in ("paper_table.csv", "paper_metrics.json", "per_video.csv"):
-                p = method_dir / stale
-                if p.is_file() or p.is_symlink():
-                    p.unlink()
+            print(f"[{method}] evaluation failed: no videos generated", file=sys.stderr)
             continue
+
         samples = [Sample(
-            name=f"{i:04d}_{Path(t.gt).stem}", fake=str(fake), gt=t.gt,
+            name=_sample_name(t, i), fake=str(fake), gt=t.gt,
             emotion=t.emotion, image=t.image, audio=t.audio,
         ) for i, t, fake in generated]
         manifest = write_manifest(method_dir / "manifest.csv", samples)
         if not args.generation_only:
-            rc = _run_paper(manifest, method, method_dir, args)
+            rc = _run_paper(manifest, method, method_dir, expected_n, upstream, args)
             overall_rc = overall_rc or rc
-            if failures and (method_dir / "paper_table.csv").is_file():
-                rows = list(csv.DictReader((method_dir / "paper_table.csv").open(encoding="utf-8")))
-                if rows:
-                    rows[0]["Status"] = "incomplete"
-                    with (method_dir / "paper_table.csv").open("w", newline="", encoding="utf-8") as f:
-                        w = csv.DictWriter(f, fieldnames=rows[0].keys()); w.writeheader(); w.writerows(rows)
+            status, n_fail = _read_method_status(method_dir)
+            if status == "partial":
+                print(f"[{method}] PARTIAL failures={n_fail}; table uses successful samples only", file=sys.stderr)
+            elif status == "failed" or rc != 0:
+                print(f"[{method}] FAILED failures={n_fail}", file=sys.stderr)
+            elif status == "complete":
+                print(f"[{method}] COMPLETE")
+            report = method_dir / "failed_samples.csv"
+            if report.is_file() and n_fail:
+                print(f"[{method}] failed sample report: {report}", file=sys.stderr)
+
     if not args.generation_only:
         table = _combine_tables(root, args.baselines)
         if table is not None:
