@@ -83,17 +83,32 @@ def _safe_stem(name: str, index: int) -> str:
 
 
 def _stage_emotion_inputs(samples: list[Sample], root: Path):
-    root.mkdir(parents=True, exist_ok=True)
+    """Build a clean, manifest-exact input directory for emotion evaluators.
+
+    ``work/emotion_inputs`` is disposable staging state.  Rebuilding it on
+    every invocation makes reruns idempotent and prevents files from an older
+    manifest from being silently included in EmotiEffLib/DFER-CLIP.
+    """
+    if root.is_symlink() or root.is_file():
+        root.unlink()
+    elif root.exists():
+        shutil.rmtree(root)
+    root.mkdir(parents=True, exist_ok=False)
+
     labels = root / "labels.txt"
     stem_to_sample: dict[str, Sample] = {}
     with labels.open("w", encoding="utf-8") as lf:
         for i, s in enumerate(samples):
             stem = _safe_stem(s.name, i)
             dst = root / f"{stem}{Path(s.fake).suffix.lower() or '.mp4'}"
+            src = Path(s.fake).resolve()
             try:
-                os.symlink(Path(s.fake).resolve(), dst)
+                os.symlink(src, dst)
             except OSError:
-                shutil.copy2(s.fake, dst)
+                # Some filesystems/containers disallow symlinks.  Since the
+                # staging directory was just rebuilt, copying cannot collide
+                # with a stale link from a previous evaluation.
+                shutil.copy2(src, dst)
             stem_to_sample[dst.stem] = s
             if s.emotion:
                 lf.write(f"{dst.stem} {s.emotion}\n")
