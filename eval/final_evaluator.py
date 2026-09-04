@@ -12,7 +12,6 @@ import argparse
 import csv
 import importlib
 import json
-import shutil
 import subprocess
 import sys
 import time
@@ -79,7 +78,6 @@ def read_triples(args) -> list[Triple]:
 
 def _pair_name(rb, method: str, t: Triple, idx: int, scenario: str) -> str:
     kwargs = dict(image=t.image, audio=t.audio, scenario=scenario, idx=idx)
-    # Only EAT's official generation route uses GT-derived pose/driving motion.
     kwargs["driving_video"] = t.gt if method == "eat_code" else None
     return rb.get_pair_name(**kwargs)
 
@@ -99,14 +97,11 @@ def generate_one(rb, method: str, t: Triple, idx: int, outdir: Path, scenario: s
         rc = fn(image=t.image, audio=t.audio, output_dir=str(outdir),
                 driving_video=t.gt, emo=mapped, scenario=scenario, idx=idx)
     else:
-        # Explicitly withhold GT motion from ordinary audio-driven baselines.
         rc = fn(image=t.image, audio=t.audio, output_dir=str(outdir),
                 driving_video=None, scenario=scenario, idx=idx)
     if rc not in (0, None):
         raise RuntimeError(f"{method} returned rc={rc}")
     if not target.is_file():
-        # Some wrappers return/rename output after generation. Resolve by name first,
-        # then accept a unique newly produced mp4 as a compatibility fallback.
         candidates = sorted(outdir.glob("*.mp4"), key=lambda p: p.stat().st_mtime, reverse=True)
         exact = [p for p in candidates if p.stem == name]
         if exact:
@@ -119,6 +114,13 @@ def generate_one(rb, method: str, t: Triple, idx: int, outdir: Path, scenario: s
 
 
 def _run_paper(manifest: Path, method: str, outdir: Path, args) -> int:
+    # Remove previous top-level outputs before a new evaluation.  This prevents
+    # a failed rerun from leaving an old paper_table.csv that looks current.
+    for stale in ("paper_table.csv", "paper_metrics.json", "per_video.csv"):
+        p = outdir / stale
+        if p.is_file() or p.is_symlink():
+            p.unlink()
+
     cmd = [sys.executable, str(PAPER_EVALUATOR), "--manifest", str(manifest),
            "--method", method, "--output-dir", str(outdir),
            "--device", args.device, "--timeout", str(args.timeout)]
@@ -129,7 +131,7 @@ def _run_paper(manifest: Path, method: str, outdir: Path, args) -> int:
     return subprocess.call(cmd, cwd=str(THIS_DIR))
 
 
-def _combine_tables(root: Path, methods: list[str]) -> Path:
+def _combine_tables(root: Path, methods: list[str]) -> Optional[Path]:
     rows = []
     header = None
     for method in methods:
@@ -137,13 +139,20 @@ def _combine_tables(root: Path, methods: list[str]) -> Path:
         if not p.is_file():
             continue
         with p.open(newline="", encoding="utf-8") as f:
-            r = csv.DictReader(f)
-            header = r.fieldnames
-            rows.extend(r)
+            reader = csv.DictReader(f)
+            method_rows = list(reader)
+            if not method_rows:
+                continue
+            header = reader.fieldnames
+            rows.extend(method_rows)
     out = root / "paper_table.csv"
-    if header:
-        with out.open("w", newline="", encoding="utf-8") as f:
-            w = csv.DictWriter(f, fieldnames=header); w.writeheader(); w.writerows(rows)
+    if not rows or not header:
+        if out.is_file() or out.is_symlink():
+            out.unlink()
+        return None
+    with out.open("w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=header)
+        w.writeheader(); w.writerows(rows)
     return out
 
 
@@ -197,6 +206,10 @@ def main() -> int:
         if failures and not args.allow_partial:
             overall_rc = overall_rc or 2
             print(f"[{method}] evaluation skipped: generation coverage {len(generated)}/{len(triples)}", file=sys.stderr)
+            for stale in ("paper_table.csv", "paper_metrics.json", "per_video.csv"):
+                p = method_dir / stale
+                if p.is_file() or p.is_symlink():
+                    p.unlink()
             continue
         samples = [Sample(
             name=f"{i:04d}_{Path(t.gt).stem}", fake=str(fake), gt=t.gt,
@@ -206,8 +219,6 @@ def main() -> int:
         if not args.generation_only:
             rc = _run_paper(manifest, method, method_dir, args)
             overall_rc = overall_rc or rc
-            # If this is a diagnostic partial run, ensure the row cannot be
-            # mistaken for a complete benchmark.
             if failures and (method_dir / "paper_table.csv").is_file():
                 rows = list(csv.DictReader((method_dir / "paper_table.csv").open(encoding="utf-8")))
                 if rows:
@@ -216,7 +227,11 @@ def main() -> int:
                         w = csv.DictWriter(f, fieldnames=rows[0].keys()); w.writeheader(); w.writerows(rows)
     if not args.generation_only:
         table = _combine_tables(root, args.baselines)
-        print(f"[final-eval] combined paper table: {table}")
+        if table is not None:
+            print(f"[final-eval] combined paper table: {table}")
+        else:
+            print("[final-eval] no paper table produced in this run", file=sys.stderr)
+            overall_rc = overall_rc or 2
     return overall_rc
 
 
