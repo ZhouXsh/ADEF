@@ -56,7 +56,6 @@ cross_criterion = torch.nn.CrossEntropyLoss()
 
 EMOTION_TABLE_PREFIXES = (
     "emo_embed",
-    "emotion_residual",
 )
 EMOTION_SHARED_PREFIXES = (
     "null_emotion_feat",
@@ -102,8 +101,6 @@ def initialize_generic_stage(model):
             model.null_emotion_feat.zero_()
         if hasattr(model, "emo_embed"):
             model.emo_embed.weight.zero_()
-        if hasattr(model, "emotion_residual"):
-            model.emotion_residual.zero_()
         if hasattr(model, "adaLN_modulation"):
             last_linear = model.adaLN_modulation[-1]
             if hasattr(last_linear, "bias") and last_linear.bias is not None:
@@ -122,10 +119,6 @@ def sync_generic_priors(model, include_emotion_embedding):
         if include_emotion_embedding and hasattr(model, "emo_embed"):
             model.emo_embed.weight[1:].copy_(
                 model.emo_embed.weight[0:1].expand_as(model.emo_embed.weight[1:])
-            )
-        if hasattr(model, "emotion_residual"):
-            model.emotion_residual[1:].copy_(
-                model.emotion_residual[0:1].expand_as(model.emotion_residual[1:])
             )
 
 

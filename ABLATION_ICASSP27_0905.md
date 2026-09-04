@@ -9,6 +9,8 @@ Every ablation below is a **physical training-file copy** and has a dedicated **
 
 After re-checking the paper claims, only six additional controlled runs are necessary. The existing 6006/6008/6007/6010/6009 runs already isolate shared-prior warm-start, balanced MEAD sampling, and Min-SNR. Generic replay (6011) is diagnostic and is not part of the final method. Radius-0/global attention is not a headline contribution (the manuscript explicitly treats the local/global temporal design as architectural context), so it should not consume main ablation budget unless reviewers request it.
 
+Two originally drafted rows are intentionally not duplicated here. **Audio-only** should be reported as the controlled KDTalker-style baseline rather than as another ADEF ablation. **Late label concatenation** is omitted from the minimum suite because it changes the denoiser input projection/capacity and is less clean than the same-parameter additive and DiT-internal controls. If the manuscript retains a claim that late concatenation was tested, that row must either be implemented separately or removed from the claim/table before submission.
+
 | ID | Training file | Scientific question | Primary metrics |
 |---|---|---|---|
 | `cond_additive` | `train_Ablation0905_cond_additive.py` | Conditioning control: replace pre-audio affine reparameterization with an additive target bias while retaining the final 6009 training recipe. | T-UAR, leakage, target-source margin, LSE-C |
@@ -34,7 +36,7 @@ This directly tests whether **pre-motion affective acoustic reparameterization**
 Compare the final 6009 model against:
 
 - `motion_partition`: the same denoiser parameters are evaluated through a speech-only path and a target-conditioned path; output coordinates are forced to come from one path or the other. By default keypoint indices 0--10 are target-conditioned and 11--20 are speech-only, while the 7 global motion dimensions remain target-conditioned. The exact index set is configurable with `--partition_keypoint_indices`. For the paper, keep one fixed mask for all identities and disclose it. If an image-space support diagnostic is available, pass its pre-registered mask rather than tuning the mask on test results.
-- `emotion_residual`: target emotion is represented as a category-specific additive 80x70 motion residual on top of a category-agnostic speech trajectory. It cannot alter the speech generator through acoustic FiLM, so it is a direct residual-composition alternative.
+- `emotion_residual`: target emotion is represented as an additive 80x70 motion residual on top of a category-agnostic speech trajectory. The residual reuses the final model's existing emotion embedding, affine head, positional encoding, and shared motion decoder, so **no new trainable parameters are added**. It cannot alter the speech generator through acoustic FiLM, making it an exact-parameter-count residual-composition alternative.
 
 Do **not** choose the partition mask after seeing test scores. That would invalidate the controlled comparison.
 
@@ -84,3 +86,5 @@ python train_Ablation0905_motion_partition.py   --partition_keypoint_indices 0,2
 ## Checkpoint provenance
 
 Each training script writes its own `variant_name` and `model_variant` into checkpoint args. Keep those fields when generating videos so a checkpoint is always loaded with its dedicated model file.
+
+`src/utils/helper.py` resolves the `emotion_dit_ablation0905_*` model namespace directly from checkpoint metadata and passes the partition-mask argument only to the partition model. This prevents evaluation from silently loading the final 6009 class for an ablation checkpoint.

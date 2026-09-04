@@ -310,11 +310,6 @@ class DitTalkingHead(nn.Module):
         self.start_motion_feat = nn.Parameter(
             torch.randn(emo_classes, self.n_prev_motions, self.motion_feat_dim))
 
-        # Competing factorization: category-specific motion is represented as an
-        # additive trajectory residual on top of a category-agnostic speech path.
-        self.emotion_residual = nn.Parameter(torch.zeros(
-            emo_classes, self.n_prev_motions + self.n_motions, self.motion_feat_dim
-        ))
 
         # Diffusion model — align_mask_width 直接下放到 DenoisingNetwork
         self.denoising_net = DenoisingNetwork(
@@ -352,6 +347,25 @@ class DitTalkingHead(nn.Module):
     @property
     def device(self):
         return next(self.parameters()).device
+
+    def _build_emotion_residual(self, emo_index):
+        """Build a category residual with the final model's existing parameters.
+
+        The competing method keeps exactly the same trainable parameter count as
+        ADEF. Existing emotion parameters produce a category code, positional
+        encoding makes it time-varying, and the shared motion decoder maps it to
+        the 70-D trajectory. No residual table or extra residual network is added.
+        """
+        emo_feat = self.emo_embed(emo_index).unsqueeze(1)
+        emo_shift, emo_scale = self.adaLN_modulation(emo_feat).chunk(2, dim=2)
+        emotion_code = emo_shift + emo_scale
+        total_len = self.n_prev_motions + self.n_motions
+        if self.denoising_net.use_learnable_pe:
+            position = self.denoising_net.PE[:, :total_len]
+        else:
+            position = self.denoising_net.PE.pe[:, :total_len]
+        residual_hidden = emotion_code + position.to(emotion_code.dtype)
+        return self.denoising_net.motion_dec(residual_hidden)
 
     def extract_audio_feature(self, audio, frame_num=None):
         frame_num = frame_num or self.n_motions
@@ -414,7 +428,7 @@ class DitTalkingHead(nn.Module):
         prev_audio_feat = self.audio_norm(prev_audio_feat)
         null_audio_feat = self.null_audio_feat.expand(batch_size, self.n_motions, -1)
         audio_feat_uncond = self.audio_norm(null_audio_feat)
-        residual_cond = torch.index_select(self.emotion_residual, 0, emo_index)
+        residual_cond = self._build_emotion_residual(emo_index)
         residual_uncond = torch.zeros_like(residual_cond)
 
         # One dropout decision controls both audio and emotion.
@@ -588,11 +602,11 @@ class DitTalkingHead(nn.Module):
             raise ValueError(f'Incorrect audio input shape {audio_or_feat.shape}')
 
         if prev_motion_feat is None:
-            prev_motion_feat = torch.index_select(self.start_motion_feat, 0, emo_index)
+            prev_motion_feat = self.start_motion_feat[0:1].expand(batch_size, -1, -1)
 
         prev_audio_is_start = prev_audio_feat is None
         if prev_audio_is_start:
-            prev_audio_feat = torch.index_select(self.start_audio_feat, 0, emo_index)
+            prev_audio_feat = self.start_audio_feat[0:1].expand(batch_size, -1, -1)
 
         if motion_at_T is None:
             motion_at_T = torch.randn(
@@ -605,7 +619,7 @@ class DitTalkingHead(nn.Module):
         prev_audio_feat = self.audio_norm(prev_audio_feat)
         null_audio_feat = self.null_audio_feat.expand(batch_size, self.n_motions, -1)
         audio_feat_uncond = self.audio_norm(null_audio_feat)
-        residual_cond = torch.index_select(self.emotion_residual, 0, emo_index)
+        residual_cond = self._build_emotion_residual(emo_index)
 
         if use_joint_cfg:
             audio_feat_in = torch.cat([audio_feat_uncond, audio_feat_cond], dim=0)
