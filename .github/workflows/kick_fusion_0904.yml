@@ -18,21 +18,10 @@ jobs:
           ref: develop
           fetch-depth: 0
 
-      - name: Extract and run generator
+      - name: Generate fusion training scripts
         run: |
-          python - <<'PY'
-          from pathlib import Path
-          import base64
-          text = Path('.github/workflows/generate_fusion_variants_0904.yml').read_text()
-          line = next(
-              line for line in text.splitlines()
-              if 'base64 -d > /tmp/gen0904.py' in line
-          )
-          payload = line.split("echo '", 1)[1].split("' | base64", 1)[0]
-          Path('/tmp/gen0904.py').write_bytes(base64.b64decode(payload))
-          PY
-          python -m py_compile /tmp/gen0904.py
-          python /tmp/gen0904.py
+          python -m py_compile .github/scripts/gen_fusion_0904.py
+          python .github/scripts/gen_fusion_0904.py
 
       - name: Validate generated files
         run: |
@@ -49,6 +38,7 @@ jobs:
         run: |
           rm -f .github/workflows/kick_fusion_0904.yml
           rm -f .github/workflows/generate_fusion_variants_0904.yml
+          rm -f .github/scripts/gen_fusion_0904.py
           git config user.name 'OpenAI Codex'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add \
@@ -59,7 +49,7 @@ jobs:
             train_Unification_twostage0904_fusion_lowaudio_protect_ema.py \
             train_Unification_twostage0904_fusion_freezeaudio_protect_ema.py \
             FUSION_VARIANTS_0904.md
-          git add -u -- .github/workflows/kick_fusion_0904.yml .github/workflows/generate_fusion_variants_0904.yml
+          git add -u -- .github/workflows/kick_fusion_0904.yml .github/workflows/generate_fusion_variants_0904.yml .github/scripts/gen_fusion_0904.py
           git diff --cached --check
           git commit -m 'add 0904 fusion tail-refinement training variants [skip ci]'
           git push origin HEAD:develop
