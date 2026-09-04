@@ -1,133 +1,95 @@
-# ADEF 论文评估协议（Paper Protocol v2）
+# ADEF 论文评估协议（Paper Protocol v3）
 
-> **论文实验请以 `paper_evaluator.py` 的 `paper_table.csv` 为唯一主表来源。**
-> `Status=complete` 才表示该行满足完整样本覆盖；`incomplete` 只能用于排错，不能填论文表。
-
-## 1. 论文主表指标
-
-| 指标 | 方向 | 本仓库协议 | 官方来源 / 对齐依据 | 聚合层级 |
-|---|---:|---|---|---|
-| LSE-D ↓ / LSE-C ↑ | ↓ / ↑ | 25 fps → S3FD face track/crop → SyncNet-v2 | Wav2Lip `evaluation/scores_LSE` + `joonson/syncnet_python` | 每视频评分后，对完整测试集求均值 |
-| FID ↓ | ↓ | 所有 GT 视频帧汇成一个 real set；所有生成帧汇成一个 fake set；调用 `pytorch-fid` 一次 | Wav2Lip evaluation README + `mseitzer/pytorch-fid` | **数据集级一次计算** |
-| FVD ↓ | ↓ | 每视频均匀采样固定帧数 → Google I3D → 两个完整视频分布的 Fréchet distance | `google-research/google-research/frechet_video_distance` | **数据集级一次计算** |
-| PSNR ↑ / SSIM ↑ | ↑ | EAT `test_psnr_ssim.py` 的 temporal linspace pairing + `utils_crop_psnr.crop_and_align` | `yuangan/evaluation_eat` | 有效对齐帧全局均值 |
-| LPIPS ↓ | ↓ | 与 PSNR/SSIM 使用同一组 `utils_crop_psnr` 对齐帧对；官方 `lpips` AlexNet | `richzhang/PerceptualSimilarity` / `lpips` | 有效对齐帧全局均值 |
-| M-LMD ↓ / F-LMD ↓ | ↓ | EAT `preprocess.py` 的 `utils_crop.crop_and_align` + `test_lmd.py` dlib-68：嘴部20点/全脸68点，分别去中心后逐点L2 | `yuangan/evaluation_eat` | 先每视频均值，再对视频均值 |
-| EmotiEff-Acc ↑ | ↑ | MTCNN 检出人脸后，EmotiEffLib 8 类视频主导情感与目标标签比较 | `sb-ai-lab/EmotiEffLib` | 8 类视频 accuracy |
-| DFER-CLIP-Acc ↑ | ↑ | 官方 DFEW fold-1 / ViT-B/32 / 16 segments / class descriptor | `zengqunzhao/DFER-CLIP` | 7 类视频 accuracy |
-
-### DFER-CLIP 的类别边界
-
-DFEW 只有：`happiness, sadness, neutral, anger, surprise, disgust, fear`，**没有 `contempt`**。
-因此 MEAD 的 `contempt` 样本会输出 `label_supported=false`、`correct=null`，不进入 DFER accuracy 分母；`paper_table.csv` 同时给出 `DFER-N`。不要把该列称为“MEAD 8-class accuracy”，论文中建议写 **DFER-CLIP Acc. (7 cls.)**。
-
-## 2. 已纠正的关键错误
-
-1. **LSE 不再把整张视频帧直接 resize 到 224×224。** 默认先执行 SyncNet 官方 `run_pipeline.py`：转 25 fps、S3FD 检测/跟踪、224×224 face crop，再送入 SyncNet-v2。短 MEAD clip 仅将 upstream 的 track-duration gate 默认调为 5；用 `--lse-min-track 100` 可恢复 Wav2Lip 原 shell 的字面默认值。
-2. **FID/FVD 不再逐视频计算后平均。** Fréchet distance 是分布级统计量；v2 每个方法在完整测试集上只产生一个 FID 和一个 FVD。
-3. **FVD 的 batch size 16 只用于 I3D inference。** 最后不足 16 的 inference batch 可内部 padding，embedding 会在计算 Fréchet statistics 前裁回真实样本数。不会再通过“复制视频到 16 个”伪造统计样本。
-4. **Emotion-FAN 不再使用随机 attention/classifier。** `Emotion-FAN/evaluate_emotion_fan.py` 必须显式提供训练完成的 AFEW FAN checkpoint，并且输入必须是官方 face-aligned frames；否则直接报错。
-5. **EmotiEff 主表使用 correctness/accuracy，而不是 dominant fraction。** `dominant_fraction=1` 也可能是 100% 稳定地预测错情感，所以它只适合作诊断。
-6. **NewEmo agreement 不再进入论文主表。** 两个分类器可以“一致地预测错”，agreement 不是 emotion correctness。
-7. **所有论文行默认要求完整覆盖。** 任一必需指标或样本失败都会令 `Status=incomplete` 且进程返回非零。
-
-## 3. 使用方式
-
-### 已生成的一种方法 / ADEF checkpoint
-
-准备 CSV：
-
-```csv
-name,fake,gt,emotion
-0001,/abs/fake1.mp4,/abs/gt1.mp4,anger
-0002,/abs/fake2.mp4,/abs/gt2.mp4,happiness
-```
-
-运行：
+统一评估引擎仍然是 `paper_evaluator.py`，正常入口不变：
 
 ```bash
-python eval/paper_evaluator.py \
-  --manifest /path/to/manifest.csv \
-  --method ADEF \
-  --output-dir /path/to/eval/ADEF \
-  --device cuda:0
-```
-
-输出：
-
-- `paper_table.csv`：论文主表的一行；
-- `paper_metrics.json`：完整协议、错误、原始聚合信息；
-- `per_video.csv`：LSE / paired metrics / emotion prediction 的逐视频审计记录；
-- `work/`：各 evaluator 的结构化中间报告。
-
-### baseline 生成 + 统一评估
-
-`final_evaluator.py` 的输入为：
-
-```text
-image,audio,gt_video[,emotion]
-```
-
-第 4 列 emotion 会逐样本生效；省略时从 MEAD GT 路径推断。运行后所有 baseline 都交给同一个 `paper_evaluator.py`，最终合并为：
-
-```text
-eval/RESULT/paper_table.csv
-```
-
-### ADEF 批量 checkpoint / 矩阵实验
-
-```bash
+python eval/final_evaluator.py --triples-file eval/my_triples.txt
 python eval/ADEF_evaluator.py <exam_name> --pairs-file /path/to/pairs.txt
 python eval/ADEF_all_evaluator.py --pairs-file /path/to/pairs.txt
 ```
 
-`ADEF_all_evaluator.py` 只把当前 v2 协议下 `Status=complete` 的实验视为 done；旧 summary 或 incomplete 行会重新评估。
+## v3：失败样本不再导致整项清空
 
-## 4. EAT / EmoNet 目录与运行前检查
+每个指标只使用该指标成功的样本计算最终值，并显式记录 coverage：
 
-当前仓库中的 `eval/evaluation_eat/` 和 `eval/emonet/` 是**直接 vendored 的普通目录**，不是 Git submodule。因此不需要、也不应该再执行 `git submodule update --init --recursive`。
+- `LSE-N`：成功得到 LSE-D/LSE-C 的视频数；
+- `FID-N`：进入 FID real/fake 两个分布的成功配对视频数；
+- `FVD-N`：进入 I3D/FVD 分布的成功配对视频数；
+- `PSNR-N` / `SSIM-N` / `LPIPS-N`：各指标至少有一个有效 EAT 对齐帧的视频数；
+- `LMD-N`：至少有一个有效 dlib landmark 帧的视频数；
+- `EmotiEff-N`：成功得到主导情感且存在目标标签的视频数；
+- `DFER-N`：成功推理且目标属于 DFER-CLIP 七类的视频数。MEAD `contempt` 不属于 DFER-CLIP 标签空间，因此不进入分母，也不算失败。
 
-目前 pairwise wrapper 对 EAT 文件的使用关系是：
+每次评估额外生成：
 
 ```text
-PSNR / SSIM / LPIPS
-  -> eval/evaluation_eat/code/utils_crop_psnr.py
-
-M-LMD / F-LMD
-  -> eval/evaluation_eat/code/utils_crop.py
-  -> dlib 68-point predictor
+failed_samples.csv
 ```
 
-这与当前 vendored EAT 脚本保持一致：`test_psnr_ssim.py` 显式导入 `utils_crop_psnr.crop_and_align`，而 `preprocess.py` 使用 `utils_crop.crop_and_align` 生成 LMD 所依赖的对齐视频。
+逐条记录 `metric / name / fake / gt / error`，终端也会打印失败视频和原因。
 
-`shape_predictor_68_face_landmarks.dat` 可以放在以下任一位置：
+状态含义：
+
+- `complete`：所有请求指标对所有 eligible 样本均成功；
+- `partial`：每个请求指标都有可用结果，但存在部分失败样本；表格数值已经按成功样本计算；
+- `failed`：至少有一个请求指标一个可用 aggregate 都没有。
+
+`ADEF_all_evaluator.py` 会把当前 v3 的 `complete` 和 `partial` 都视为已完成；只有 `failed` 会在下次自动重试。需要重跑 partial 时使用 `--include-done`。
+
+## 指标协议
+
+| 指标 | 方向 | v3 实现 |
+|---|---:|---|
+| LSE-D / LSE-C | ↓ / ↑ | 25 fps → S3FD track/crop → SyncNet-v2；逐视频评分，成功视频求均值 |
+| FID | ↓ | 成功 pair 的所有帧汇成 real/fake 两个分布，只计算一次 pytorch-fid |
+| FVD | ↓ | 成功 pair 均匀采样固定帧数 → Google I3D，完整成功视频分布只计算一次 FVD |
+| PSNR / SSIM | ↑ | EAT `utils_crop_psnr.crop_and_align` + temporal linspace pairing；有效帧全局均值 |
+| LPIPS | ↓ | 与 PSNR/SSIM 相同的 EAT 对齐帧对；官方 `lpips` AlexNet |
+| M-LMD / F-LMD | ↓ | EAT `utils_crop` + dlib-68；嘴 20 点 / 全脸 68 点；先视频均值再数据集均值 |
+| EmotiEff-Acc | ↑ | 8 类目标情感 accuracy；无有效主导情感的视频记为失败并排除分母 |
+| DFER-CLIP-Acc | ↑ | DFEW fold-1 七类 accuracy；`contempt` 明确排除 |
+
+### FID/FVD 的部分失败处理
+
+FID/FVD 是分布级指标，不能逐视频计算后再平均。如果某个 fake 或对应 GT 无法读取，v3 会把该 sample 的 **real 与 fake 两侧同时剔除**，然后在剩余成功 sample 的完整分布上只计算一次 FID/FVD。
+
+### Pairwise 的部分失败处理
+
+PSNR/SSIM/LPIPS 和 LMD 分开记录成功覆盖。例如某视频 EAT pixel alignment 成功但 dlib landmarks 全部失败，它仍会进入 PSNR/SSIM/LPIPS，但不会进入 M-LMD/F-LMD。
+
+## 输出
+
+每个方法/实验目录包含：
+
+```text
+paper_table.csv       # 汇总表，包含每项 coverage N
+paper_metrics.json    # 完整协议、aggregate、coverage、failures、子进程信息
+per_video.csv         # 每视频结果
+failed_samples.csv    # 失败样本和原因
+work/                 # 各 evaluator 中间 JSON/manifest
+```
+
+`N` 是原始请求样本数；`Evaluated-N` 是进入统一 metric evaluation 的视频数。baseline 生成失败或 ADEF fake 缺失都会进入 upstream failure，再进入 `failed_samples.csv`，不会让其余成功视频被丢弃。
+
+## 运行前检查
+
+```bash
+python eval/check_paper_eval.py --deep-hash
+```
+
+v3 preflight 除了检查权重/源码文件，还会使用各 evaluator 实际 Python 环境检查关键 import，包括 pairwise 环境的 `skimage/dlib/imutils/lpips`，避免长批处理运行到第一个实验才发现依赖缺失。
+
+当前 `eval/evaluation_eat/` 和 `eval/emonet/` 是 vendored 普通目录，不需要 `git submodule update`。
+
+EAT predictor 可放在：
 
 ```text
 eval/evaluation_eat/code/shape_predictor_68_face_landmarks.dat
 eval/evaluation_eat/checkpoints/shape_predictor_68_face_landmarks.dat
 ```
 
-模板文件必须存在：
-
-```text
-eval/evaluation_eat/code/base_68.npy
-eval/evaluation_eat/code/base_68_close.npy
-```
-
-EmoNet 当前不是 `paper_evaluator.py` 默认论文主表指标。如果要单独运行 `eval/emonet/evaluate_emotion.py`，需要官方 8 类权重：
+EmoNet 仍不是默认论文主表指标；单独使用时权重路径为：
 
 ```text
 eval/emonet/pretrained/emonet_8.pth
-```
-
-正式长实验前先运行：
-
-```bash
-python eval/check_paper_eval.py --deep-hash
-```
-
-如果还要使用 EmoNet，则运行：
-
-```bash
-python eval/check_paper_eval.py --deep-hash --with-emonet
 ```
