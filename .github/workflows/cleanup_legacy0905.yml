@@ -17,7 +17,9 @@ jobs:
         with:
           python-version: '3.11'
       - name: Apply cleanup
-        run: python .github/cleanup_legacy0905.py
+        run: |
+          python .github/cleanup_legacy0905.py
+          sed -i 's/[[:space:]]\+$//' src/utils/helper.py src/modules/emotion_dit_Unification_jianhua0803.py src/dataset/dataset_EmotionLevel_clear_jianhua0803.py
       - name: Validate
         run: |
           python -m py_compile src/utils/helper.py src/modules/emotion_dit_Unification_jianhua0803.py src/dataset/dataset_EmotionLevel_clear_jianhua0803.py src/modules/emotion_dit_ablation0905_*.py train_Ablation0905_*.py
