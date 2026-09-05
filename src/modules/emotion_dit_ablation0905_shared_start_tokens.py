@@ -1,4 +1,4 @@
-"""Self-contained ICASSP27 controlled ablation: cond_dit_adaln.
+"""Self-contained ICASSP27 controlled ablation: shared_start_tokens.
 
 The complete model implementation and the runtime-correction layer live in this
 single file.  ``_CoreDenoisingNetwork`` and ``_CoreDitTalkingHead`` are private
@@ -7,7 +7,6 @@ public checkpoint-compatible classes.  This module never imports another
 ablation model and has no companion ``*_legacy.py`` file.
 """
 
-# ICASSP27 ablation: cond_dit_adaln. Independent legacy implementation copy.
 ## 大一统版本。
 ## 本文件是自包含的：内联了 emotion_dit_timestep_0714 中的
 ##   - DiffusionSchedule
@@ -113,7 +112,7 @@ class DiTDecoderLayer(nn.Module):
         nn.init.zeros_(self.adaLN_modulation[-1].weight)
         nn.init.zeros_(self.adaLN_modulation[-1].bias)
 
-    def forward(self, tgt, memory, t_emb, memory_mask=None, tgt_mask=None, emotion_shift=None, emotion_scale=None):
+    def forward(self, tgt, memory, t_emb, memory_mask=None, tgt_mask=None):
         # t_emb: (N, 1, d_model)  时间步嵌入，在各路径上广播
         (shift_sa, scale_sa, gate_sa,
          shift_ca, scale_ca, gate_ca,
@@ -121,22 +120,16 @@ class DiTDecoderLayer(nn.Module):
 
         # 自注意力
         h = modulate(self.norm1(tgt), shift_sa, scale_sa)
-        if emotion_shift is not None:
-            h = modulate(h, emotion_shift, emotion_scale)
         sa = self.self_attn(h, h, h, attn_mask=tgt_mask, need_weights=False)[0]
         tgt = tgt + gate_sa * sa
 
         # 交叉注意力（对音频特征 memory）
         h = modulate(self.norm2(tgt), shift_ca, scale_ca)
-        if emotion_shift is not None:
-            h = modulate(h, emotion_shift, emotion_scale)
         ca = self.cross_attn(h, memory, memory, attn_mask=memory_mask, need_weights=False)[0]
         tgt = tgt + gate_ca * ca
 
         # 前馈
         h = modulate(self.norm3(tgt), shift_ff, scale_ff)
-        if emotion_shift is not None:
-            h = modulate(h, emotion_shift, emotion_scale)
         ff = self.linear2(self.dropout(self.activation(self.linear1(h))))
         tgt = tgt + gate_ff * ff
 
@@ -153,10 +146,9 @@ class DiTDecoder(nn.Module):
             for _ in range(num_layers)
         ])
 
-    def forward(self, tgt, memory, t_emb, memory_mask=None, tgt_mask=None, emotion_shift=None, emotion_scale=None):
+    def forward(self, tgt, memory, t_emb, memory_mask=None, tgt_mask=None):
         for layer in self.layers:
-            tgt = layer(tgt, memory, t_emb, memory_mask=memory_mask, tgt_mask=tgt_mask,
-                        emotion_shift=emotion_shift, emotion_scale=emotion_scale)
+            tgt = layer(tgt, memory, t_emb, memory_mask=memory_mask, tgt_mask=tgt_mask)
         return tgt
 
 
@@ -231,8 +223,7 @@ class _CoreDenoisingNetwork(nn.Module):
     def device(self):
         return next(self.parameters()).device
 
-    def forward(self, motion_feat, audio_feat, prev_motion_feat, prev_audio_feat, step, indicator=None,
-                emotion_shift=None, emotion_scale=None):
+    def forward(self, motion_feat, audio_feat, prev_motion_feat, prev_audio_feat, step, indicator=None):
         # Diffusion time step embedding
         diff_step_embedding = self.diff_step_map(self.TE.pe[0, step]).unsqueeze(1)
 
@@ -260,11 +251,8 @@ class _CoreDenoisingNetwork(nn.Module):
 
         if self.architecture == 'decoder':
             audio_feat_in = torch.cat([prev_audio_feat, audio_feat], dim=1)
-            feat_out = self.transformer(
-                feats_in, audio_feat_in, diff_step_embedding,
-                memory_mask=self.alignment_mask,
-                emotion_shift=emotion_shift, emotion_scale=emotion_scale,
-            )
+            feat_out = self.transformer(feats_in, audio_feat_in, diff_step_embedding,
+                                        memory_mask=self.alignment_mask)
         else:
             raise ValueError(f'Unknown architecture: {self.architecture}')
 
@@ -417,24 +405,22 @@ class _CoreDitTalkingHead(nn.Module):
         audio_feat = audio_feat_saved.clone()
 
         if prev_motion_feat is None:
-            prev_motion_feat = torch.index_select(
-                self.start_motion_feat, 0, emo_index)
+            prev_motion_feat = self.start_motion_feat[0:1].expand(batch_size, -1, -1)
 
         prev_audio_is_start = prev_audio_feat is None
         if prev_audio_is_start:
-            prev_audio_feat = torch.index_select(
-                self.start_audio_feat, 0, emo_index)
+            prev_audio_feat = self.start_audio_feat[0:1].expand(batch_size, -1, -1)
 
         # Conditional branch: real audio + real emotion.
         emo_feat = self.emo_embed(emo_index).unsqueeze(1)
         emo_shift, emo_scale = self.adaLN_modulation(emo_feat).chunk(2, dim=2)
-        audio_feat_cond = self.audio_norm(audio_feat)
+        audio_feat_cond = self.audio_norm(audio_feat) * (1 + emo_scale) + emo_shift
 
         if prev_audio_is_start:
             prev_audio_feat = self.audio_norm(prev_audio_feat)
         else:
             prev_audio_feat = (
-                self.audio_norm(prev_audio_feat)
+                self.audio_norm(prev_audio_feat) * (1 + emo_scale) + emo_shift
             )
 
         # Unconditional branch: null audio + null emotion.
@@ -444,7 +430,7 @@ class _CoreDitTalkingHead(nn.Module):
             null_emotion_feat
         ).chunk(2, dim=2)
         audio_feat_uncond = (
-            self.audio_norm(null_audio_feat)
+            self.audio_norm(null_audio_feat) * (1 + null_scale) + null_shift
         )
 
         # One dropout decision controls both audio and emotion.
@@ -456,12 +442,6 @@ class _CoreDitTalkingHead(nn.Module):
             drop_joint_condition.view(-1, 1, 1),
             audio_feat_uncond,
             audio_feat_cond,
-        )
-        emotion_shift = torch.where(
-            drop_joint_condition.view(-1, 1, 1), null_shift, emo_shift
-        )
-        emotion_scale = torch.where(
-            drop_joint_condition.view(-1, 1, 1), null_scale, emo_scale
         )
 
         if time_step is None:
@@ -480,8 +460,6 @@ class _CoreDitTalkingHead(nn.Module):
             prev_audio_feat,
             time_step,
             indicator,
-            emotion_shift=emotion_shift,
-            emotion_scale=emotion_scale,
         )
 
         return (
@@ -511,10 +489,10 @@ class _CoreDitTalkingHead(nn.Module):
         audio_feat = audio_feat_saved.clone()
 
         if prev_motion_feat is None:
-            prev_motion_feat = torch.index_select(self.start_motion_feat, 0, emo_index)
+            prev_motion_feat = self.start_motion_feat[0:1].expand(batch_size, -1, -1)
         pre_None = False
         if prev_audio_feat is None:
-            prev_audio_feat = torch.index_select(self.start_audio_feat, 0, emo_index)
+            prev_audio_feat = self.start_audio_feat[0:1].expand(batch_size, -1, -1)
             pre_None = True
 
         p_AE = 0.1
@@ -527,7 +505,7 @@ class _CoreDitTalkingHead(nn.Module):
             if pre_None:
                 prev_audio_feat = self.audio_norm(prev_audio_feat)
             else:
-                prev_audio_feat = self.audio_norm(prev_audio_feat)
+                prev_audio_feat = self.audio_norm(prev_audio_feat) * (1 + emo_scale) + emo_shift
 
         if len(self.guiding_conditions) > 0:
             assert len(self.guiding_conditions) <= 2, 'Only support 1 or 2 CFG conditions!'
@@ -568,13 +546,9 @@ class _CoreDitTalkingHead(nn.Module):
 
         eps = torch.randn_like(motion_feat)
         motion_feat_noisy = c0 * motion_feat + c1 * eps
-        emotion_shift = emotion_scale = None
-        if 'emotion' in self.guiding_conditions:
-            emotion_shift, emotion_scale = self.adaLN_modulation(emo_feat).chunk(2, dim=2)
         motion_feat_target = self.denoising_net(
             motion_feat_noisy, audio_feat,
             prev_motion_feat, prev_audio_feat, time_step, indicator,
-            emotion_shift=emotion_shift, emotion_scale=emotion_scale,
         )
 
         return eps, motion_feat_target, motion_feat.detach(), audio_feat_saved.detach()
@@ -626,11 +600,11 @@ class _CoreDitTalkingHead(nn.Module):
             raise ValueError(f'Incorrect audio input shape {audio_or_feat.shape}')
 
         if prev_motion_feat is None:
-            prev_motion_feat = torch.index_select(self.start_motion_feat, 0, emo_index)
+            prev_motion_feat = self.start_motion_feat[0:1].expand(batch_size, -1, -1)
 
         prev_audio_is_start = prev_audio_feat is None
         if prev_audio_is_start:
-            prev_audio_feat = torch.index_select(self.start_audio_feat, 0, emo_index)
+            prev_audio_feat = self.start_audio_feat[0:1].expand(batch_size, -1, -1)
 
         if motion_at_T is None:
             motion_at_T = torch.randn(
@@ -642,14 +616,14 @@ class _CoreDitTalkingHead(nn.Module):
         emo_feat = self.emo_embed(emo_index).unsqueeze(1)
         emo_shift, emo_scale = self.adaLN_modulation(emo_feat).chunk(2, dim=2)
         audio_feat_cond = (
-            self.audio_norm(audio_feat_saved)
+            self.audio_norm(audio_feat_saved) * (1 + emo_scale) + emo_shift
         )
 
         if prev_audio_is_start:
             prev_audio_feat = self.audio_norm(prev_audio_feat)
         else:
             prev_audio_feat = (
-                self.audio_norm(prev_audio_feat)
+                self.audio_norm(prev_audio_feat) * (1 + emo_scale) + emo_shift
             )
 
         # Fully dropped joint condition.
@@ -659,7 +633,7 @@ class _CoreDitTalkingHead(nn.Module):
             null_emotion_feat
         ).chunk(2, dim=2)
         audio_feat_uncond = (
-            self.audio_norm(null_audio_feat)
+            self.audio_norm(null_audio_feat) * (1 + null_scale) + null_shift
         )
 
         if use_joint_cfg:
@@ -668,13 +642,6 @@ class _CoreDitTalkingHead(nn.Module):
         else:
             audio_feat_in = audio_feat_cond
             n_entries = 1
-
-        if use_joint_cfg:
-            emotion_shift_in = torch.cat([null_shift, emo_shift], dim=0)
-            emotion_scale_in = torch.cat([null_scale, emo_scale], dim=0)
-        else:
-            emotion_shift_in = emo_shift
-            emotion_scale_in = emo_scale
 
         prev_motion_feat_in = torch.cat([prev_motion_feat] * n_entries, dim=0)
         prev_audio_feat_in = torch.cat([prev_audio_feat] * n_entries, dim=0)
@@ -707,8 +674,6 @@ class _CoreDitTalkingHead(nn.Module):
                 prev_audio_feat_in,
                 step_in,
                 indicator_in,
-                emotion_shift=emotion_shift_in,
-                emotion_scale=emotion_scale_in,
             )
 
             if dynamic_threshold:
@@ -832,7 +797,7 @@ class DenoisingNetwork(_CoreDenoisingNetwork):
                 )
 
     def forward(self, motion_feat, audio_feat, prev_motion_feat, prev_audio_feat,
-                step, indicator=None, emotion_shift=None, emotion_scale=None):
+                step, indicator=None):
         if self.use_indicator and indicator is None:
             indicator = torch.ones(
                 motion_feat.shape[:2],
@@ -841,8 +806,7 @@ class DenoisingNetwork(_CoreDenoisingNetwork):
             )
         return super().forward(
             motion_feat, audio_feat, prev_motion_feat, prev_audio_feat,
-            step, indicator=indicator, emotion_shift=emotion_shift,
-            emotion_scale=emotion_scale,
+            step, indicator=indicator,
         )
 
 

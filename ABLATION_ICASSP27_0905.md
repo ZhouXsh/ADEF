@@ -1,90 +1,134 @@
 # ICASSP27 controlled ablations — 2026-09-05
 
-## Final reference
+## Reference implementation
 
-The paper reference method is `train_Unification_twostage0901_sharedcond_minsnr_balanced_ema.py` (6009).
-Every ablation below is a **physical training-file copy** and has a dedicated **physical model + legacy-model copy**. No ablation imports another ablation. This makes checkpoint/model provenance explicit and prevents nested variant dependencies.
+The final paper model is `train_Unification_twostage0901_sharedcond_minsnr_balanced_ema.py` (run 6009). Its default `align_mask_width=2` corresponds to **audio-attention radius 1** because `enc_dec_mask` uses `expansion=align_mask_width-1`.
 
-## Why these six new runs
+The Stage-1 `front_all_motions.pkl` manifest used by the final recipe has already been verified to exclude MEAD test identities. Therefore the two-stage control below tests the value of generic motion pretraining rather than repairing an identity-leakage problem.
 
-After re-checking the paper claims, only six additional controlled runs are necessary. The existing 6006/6008/6007/6010/6009 runs already isolate shared-prior warm-start, balanced MEAD sampling, and Min-SNR. Generic replay (6011) is diagnostic and is not part of the final method. Radius-0/global attention is not a headline contribution (the manuscript explicitly treats the local/global temporal design as architectural context), so it should not consume main ablation budget unless reviewers request it.
+## File organization
 
-Two originally drafted rows are intentionally not duplicated here. **Audio-only** should be reported as the controlled KDTalker-style baseline rather than as another ADEF ablation. **Late label concatenation** is omitted from the minimum suite because it changes the denoiser input projection/capacity and is less clean than the same-parameter additive and DiT-internal controls. If the manuscript retains a claim that late concatenation was tested, that row must either be implemented separately or removed from the claim/table before submission.
+Each controlled variant has exactly two user-facing files:
 
-| ID | Training file | Scientific question | Primary metrics |
-|---|---|---|---|
-| `cond_additive` | `train_Ablation0905_cond_additive.py` | Conditioning control: replace pre-audio affine reparameterization with an additive target bias while retaining the final 6009 training recipe. | T-UAR, leakage, target-source margin, LSE-C |
-| `cond_dit_adaln` | `train_Ablation0905_cond_dit_adaln.py` | Conditioning-placement control: keep acoustic tokens unmodulated and apply the same target affine inside every DiT block. | T-UAR, leakage, target-source margin, LSE-C |
-| `motion_partition` | `train_Ablation0905_motion_partition.py` | Holistic-generation control: force a coordinate pseudo-partition between speech-only and target-conditioned predictions with shared parameters. | T-UAR, leakage, FVD, LSE-C |
-| `emotion_residual` | `train_Ablation0905_emotion_residual.py` | Holistic-generation control: predict a category-agnostic speech trajectory and add an independently learned category motion residual. | T-UAR, leakage, FVD, LSE-C |
-| `single_stage_mead` | `train_Ablation0905_single_stage_mead.py` | Training-schedule control: remove Generic Stage 1 and train only the 5k specialization transition plus 240k full MEAD updates. | FVD, LSE-C, T-UAR, cross-dataset generalization |
-| `no_emotion_ce` | `train_Ablation0905_no_emotion_ce.py` | Regularization control: retain the final 6009 architecture and training schedule but set the frozen motion-classifier CE weight to zero. | T-UAR, leakage, target-source margin, LSE-C |
+```text
+train_Ablation0905_<variant>.py
+src/modules/emotion_dit_ablation0905_<variant>.py
+```
 
-## Recommended paper comparisons
+The model file is self-contained. The former `*_legacy.py` companion files have been merged into the corresponding public model file and deleted. The private `_Core*` classes and the public runtime-corrected classes intentionally coexist **inside the same file** so checkpoint compatibility is preserved without cross-file nesting. No ablation model imports another ablation model; no ablation training script imports another ablation training script.
 
-### Conditioning placement/operator
+## A. Conditioning controls — main paper table
 
-Compare the final 6009 model against:
+| Variant | Training file | What changes relative to full ADEF |
+|---|---|---|
+| `audio_only` | `train_Ablation0905_audio_only.py` | Target label is functionally disconnected; start priors are category agnostic. Target parameters remain allocated only to keep capacity/count matched. |
+| `cond_late_token_concat` | `train_Ablation0905_cond_late_token_concat.py` | Acoustic tokens remain target agnostic; one target token is appended to cross-attention memory after acoustic encoding. No new projection or parameters are added. |
+| `cond_additive` | `train_Ablation0905_cond_additive.py` | Replace feature-wise affine acoustic reparameterization with an additive target bias. |
+| `cond_dit_adaln` | `train_Ablation0905_cond_dit_adaln.py` | Acoustic carrier stays target agnostic; the target affine acts inside DiT blocks. |
+| **full 6009** | `train_Unification_twostage0901_sharedcond_minsnr_balanced_ema.py` | Target affine reparameterizes the dynamic acoustic carrier before motion decoding. |
 
-- `cond_additive`: target information is an additive bias on frame-aligned acoustic tokens.
-- `cond_dit_adaln`: acoustic tokens remain category-agnostic; the target affine is applied inside DiT blocks.
+These rows now exactly support the conditioning comparison stated in the manuscript. `cond_late_token_concat` is deliberately **token concatenation**, not feature-dimension concatenation: appending a 512-D target token keeps the denoiser width and trainable parameter count unchanged, whereas feature concatenation would require an extra projection and confound placement with capacity.
 
-This directly tests whether **pre-motion affective acoustic reparameterization** is preferable to a simpler additive operator and to moving the affine condition into the motion backbone. Use the 8x8 source-to-target counterfactual protocol; matched MEAD emotion accuracy alone is not sufficient.
+Primary evidence: counterfactual T-UAR/E-UAR, source-emotion leakage, target-source probability margin, LSE-C/LSE-D, FVD.
 
-### Holistic generation vs forced factorization
+## B. Holistic-generation controls — main paper table
 
-Compare the final 6009 model against:
+| Variant | Training file | Scientific question |
+|---|---|---|
+| `motion_partition` | `train_Ablation0905_motion_partition.py` | What happens when output coordinates are forced to come from speech-only vs target-conditioned paths instead of one holistic trajectory model? |
+| `emotion_residual` | `train_Ablation0905_emotion_residual.py` | Is `speech trajectory + additive emotion residual` sufficient compared with holistic joint generation? |
+| **full 6009** | final training file | Does one joint conditional diffusion distribution better preserve both target affect and speech synchronization? |
 
-- `motion_partition`: the same denoiser parameters are evaluated through a speech-only path and a target-conditioned path; output coordinates are forced to come from one path or the other. By default keypoint indices 0--10 are target-conditioned and 11--20 are speech-only, while the 7 global motion dimensions remain target-conditioned. The exact index set is configurable with `--partition_keypoint_indices`. For the paper, keep one fixed mask for all identities and disclose it. If an image-space support diagnostic is available, pass its pre-registered mask rather than tuning the mask on test results.
-- `emotion_residual`: target emotion is represented as an additive 80x70 motion residual on top of a category-agnostic speech trajectory. The residual reuses the final model's existing emotion embedding, affine head, positional encoding, and shared motion decoder, so **no new trainable parameters are added**. It cannot alter the speech generator through acoustic FiLM, making it an exact-parameter-count residual-composition alternative.
+For `motion_partition`, pre-register the coordinate mask before evaluating test results. The default indices are only a runnable reference. If the image-space support diagnostic produces a justified pseudo-partition, use that fixed mask for the paper run; never select a mask after seeing test scores.
 
-Do **not** choose the partition mask after seeing test scores. That would invalidate the controlled comparison.
+## C. Frame-local cross-attention controls — required by the current manuscript
 
-### Training protocol / semantic regularization
+The implementation mapping is:
 
-- `single_stage_mead`: removes Generic pretraining but preserves the same MEAD budget (5k emotion/start transition + 240k full MEAD), Min-SNR, balance, EMA, architecture, losses, and learning-rate family. This is the correct control for the two-data-stage claim.
-- `no_emotion_ce`: changes only `lambda_emo` from 1 to 0. This isolates the frozen classifier regularizer.
+| Paper radius | `align_mask_width` | Training file |
+|---|---:|---|
+| radius 0 | 1 | `train_Ablation0905_attn_radius0.py` |
+| **radius 1 (full 6009)** | **2** | final training file; **do not retrain** |
+| radius 2 | 3 | `train_Ablation0905_attn_radius2.py` |
+| global / unrestricted | 0 | `train_Ablation0905_attn_global.py` |
 
-## Existing training-recipe ablation (do not retrain)
+This set is necessary because the current paper explicitly states that radius `{0,1,2}` and unrestricted attention are evaluated. Earlier advice to omit these runs was therefore too conservative.
 
-Use the already trained runs on the **same final evaluation set**:
+Primary evidence: LSE-C/LSE-D first, then FVD and target emotion metrics. The expected scientific question is whether radius 1 gives enough local audiovisual tolerance without allowing unrelated acoustic frames to dominate.
+
+## D. Training / regularization controls
+
+| Variant | Training file | Change |
+|---|---|---|
+| `single_stage_mead` | `train_Ablation0905_single_stage_mead.py` | Remove 190k generic Stage 1; keep the same 5k specialization + 240k MEAD adaptation budget and final training recipe. |
+| `no_emotion_ce` | `train_Ablation0905_no_emotion_ce.py` | Set the frozen motion-classifier CE weight to zero. |
+| `shared_start_tokens` | `train_Ablation0905_shared_start_tokens.py` | Keep full ADEF conditioning, but force category-agnostic first-window start priors. This checks that target control is not merely coming from emotion-indexed initialization. |
+
+`shared_start_tokens` is an additional confound check rather than a headline contribution. It is worth running because the Method explicitly mentions emotion-indexed start tokens; a strong result here can show that acoustic reparameterization remains effective without category-specific initialization.
+
+## E. Existing recipe ablations — reuse; do not retrain
+
+Evaluate these existing checkpoints on the **same final test protocol**:
 
 - 6006 `schedule_ema`: no shared-condition warm-start, no Min-SNR, no balanced sampling.
-- 6008 `sharedcond_ema`: + shared generic prior.
-- 6007 `sharedcond_balanced_ema`: + balanced MEAD sampling.
-- 6010 `sharedcond_minsnr_ema`: + Min-SNR.
-- 6009 `sharedcond_minsnr_balanced_ema`: final method.
+- 6008 `sharedcond_ema`: adds shared generic condition warm-start.
+- 6007 `sharedcond_balanced_ema`: adds balanced MEAD sampling without Min-SNR.
+- 6010 `sharedcond_minsnr_ema`: adds Min-SNR without balancing.
+- 6009 `sharedcond_minsnr_balanced_ema`: full recipe.
 
-This table is supporting evidence for the training recipe, not the main method-claim table.
+Together they isolate shared-condition warm-start, class/level balancing, Min-SNR, and their combination. 6011 generic replay remains a diagnostic rather than part of the final method.
+
+## Recommended training batches for six GPUs
+
+The number of experiments is **not** limited to six. A practical order is:
+
+```text
+Batch 1 (main conditioning/representation):
+  audio_only
+  cond_late_token_concat
+  cond_additive
+  cond_dit_adaln
+  emotion_residual
+  motion_partition   [only after the partition mask is frozen]
+
+Batch 2 (temporal/training/confound):
+  attn_radius0
+  attn_radius2
+  attn_global
+  single_stage_mead
+  no_emotion_ce
+  shared_start_tokens
+```
+
+If the pseudo-partition is not ready, move `motion_partition` to Batch 2 and use the free Batch-1 GPU for one fixed-seed replication of a high-priority conditioning row.
 
 ## Run commands
 
 ```bash
+python train_Ablation0905_audio_only.py
+python train_Ablation0905_cond_late_token_concat.py
 python train_Ablation0905_cond_additive.py
 python train_Ablation0905_cond_dit_adaln.py
 python train_Ablation0905_motion_partition.py
 python train_Ablation0905_emotion_residual.py
+python train_Ablation0905_attn_radius0.py
+python train_Ablation0905_attn_radius2.py
+python train_Ablation0905_attn_global.py
 python train_Ablation0905_single_stage_mead.py
 python train_Ablation0905_no_emotion_ce.py
-```
-
-For `motion_partition`, a different **pre-registered** pseudo-partition can be supplied, e.g.
-
-```bash
-python train_Ablation0905_motion_partition.py   --partition_keypoint_indices 0,2,4,7,9,11,13,15,18,19
+python train_Ablation0905_shared_start_tokens.py
 ```
 
 ## Evaluation rules
 
-1. Use exactly the same held-out identities, renderer, source portraits, audio clips, CFG scale, diffusion steps, and preprocessing for every row.
-2. For counterfactual control, hold portrait and audio fixed and generate all target emotions. Use the same initial diffusion seed/noise for corresponding comparisons.
-3. Report target UAR (or the final independent RGB emotion metric), source-emotion leakage, target-source probability margin, LSE-C/LSE-D, and FVD.
-4. Do not use the training-time motion classifier as the paper emotion evaluator.
-5. Evaluate multiple fixed diffusion seeds when budget permits and report paired uncertainty.
-6. The final 6009 Stage-1 manifest is assumed to exclude MEAD test identities, as verified before these ablations.
+1. Use the same held-out identities, renderer, portraits, audio clips, preprocessing, diffusion steps and CFG setting for all causal comparisons.
+2. Counterfactual evaluation fixes portrait/audio and generates every target category. Use identical diffusion initial noise for paired variant comparisons.
+3. Report target RGB-video UAR, source leakage, target-source probability margin, LSE-C/LSE-D, FVD, and motion magnitude. Do not use the training-time motion classifier as the paper emotion evaluator.
+4. For attention-radius rows, emphasize LSE before affect scores; for conditioning rows, emphasize target adherence/leakage while confirming LSE is not materially degraded.
+5. Use multiple fixed seeds or paired bootstrap confidence intervals when budget permits.
+6. Keep `model_variant` from the checkpoint. `src/utils/helper.py` dynamically resolves only the controlled `emotion_dit_ablation0905_*` namespace so evaluation loads the correct physical model file.
+7. Smoke-test each new entrypoint for 10–50 iterations before launching the full run.
 
-## Checkpoint provenance
+## Scope decision
 
-Each training script writes its own `variant_name` and `model_variant` into checkpoint args. Keep those fields when generating videos so a checkpoint is always loaded with its dedicated model file.
-
-`src/utils/helper.py` resolves the `emotion_dit_ablation0905_*` model namespace directly from checkpoint metadata and passes the partition-mask argument only to the partition model. This prevents evaluation from silently loading the final 6009 class for an ablation checkpoint.
+No extra ablations are added merely because GPUs are available. In particular, EMA itself is an optimization/stabilization device rather than a claimed methodological contribution, and generic replay is not in the final method. The 12 controlled variants above cover every comparison explicitly promised by the current manuscript plus the category-specific-start confound, while the already trained 6006/6007/6008/6010 checkpoints cover the remaining recipe factors.

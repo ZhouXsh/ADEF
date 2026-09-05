@@ -4,8 +4,8 @@ The original helper is kept in ``helper_legacy``. Motion-generator construction
 is overridden so checkpoints trained after the 0803 parameter-propagation fix
 are reconstructed with the exact architecture recorded in ``args``. ICASSP27
 controlled-ablation checkpoints additionally record a dedicated ``model_variant``;
-those variants are resolved through a strict allow-list prefix so inference never
-silently falls back to the final ADEF class. Older checkpoints retain their
+those self-contained variants are resolved through a strict allow-list prefix so
+inference never silently falls back to the final ADEF class. Older checkpoints retain their
 existing fallback behavior.
 """
 
@@ -67,8 +67,8 @@ def _resolve_motion_model_class(model_args):
     if model_variant.startswith(_ABLATION_PREFIX):
         if model_variant.endswith("_legacy"):
             raise ValueError(
-                "model_variant must name the public ablation wrapper, not its "
-                f"legacy implementation: {model_variant}"
+                "legacy ablation module names are no longer valid after the one-file "
+                f"refactor: {model_variant}"
             )
         if not all(ch.isalnum() or ch == "_" for ch in model_variant):
             raise ValueError(f"unsafe model_variant in checkpoint: {model_variant!r}")
