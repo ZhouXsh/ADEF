@@ -1,0 +1,74 @@
+name: Retry ablation refactor and expansion 0905
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - '.github/workflows/apply_ablation_refactor_expand_0905_retry.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Patch generator assertion and apply refactor
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('.github/ablation_refactor_expand_0905.py')
+          text = p.read_text(encoding='utf-8')
+          old = "    if n_m < 2 or n_a < 2:\n        raise RuntimeError(f'shared_start: unexpected replacement counts motion={n_m}, audio={n_a}')\n"
+          new = "    if n_m < 1 or n_a < 1:\n        raise RuntimeError(f'shared_start: unexpected replacement counts motion={n_m}, audio={n_a}')\n"
+          if old not in text:
+              raise RuntimeError('shared-start assertion anchor not found')
+          p.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+          python .github/ablation_refactor_expand_0905.py
+
+      - name: Validate Python and independence
+        run: |
+          python -m py_compile train_Ablation0905_*.py src/modules/emotion_dit_ablation0905_*.py src/utils/helper.py
+          git diff --check
+          python - <<'PY'
+          from pathlib import Path
+          trains = sorted(Path('.').glob('train_Ablation0905_*.py'))
+          models = sorted(Path('src/modules').glob('emotion_dit_ablation0905_*.py'))
+          legacy = sorted(Path('src/modules').glob('emotion_dit_ablation0905_*_legacy.py'))
+          assert len(trains) == 12, len(trains)
+          assert len(models) == 12, len(models)
+          assert not legacy, legacy
+          for train in trains:
+              slug = train.stem.replace('train_Ablation0905_', '')
+              text = train.read_text(encoding='utf-8')
+              own = f'from src.modules.emotion_dit_ablation0905_{slug} import DitTalkingHead'
+              assert own in text, (train, own)
+          for model in models:
+              text = model.read_text(encoding='utf-8')
+              assert '_legacy as _legacy' not in text, model
+              assert '_CoreDitTalkingHead' in text, model
+              assert 'class DitTalkingHead(_CoreDitTalkingHead):' in text, model
+          print('12-variant one-file ablation suite static validation passed')
+          PY
+
+      - name: Commit generated suite and remove temporary machinery
+        run: |
+          rm -f .github/ablation_refactor_expand_0905.py
+          rm -f .github/workflows/apply_ablation_refactor_expand_0905.yml
+          rm -f .github/workflows/apply_ablation_refactor_expand_0905_retry.yml
+          git config user.name 'OpenAI Codex'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A -- ABLATION_ICASSP27_0905.md train_Ablation0905_*.py src/modules/emotion_dit_ablation0905_*.py src/utils/helper.py .github/ablation_refactor_expand_0905.py .github/workflows/apply_ablation_refactor_expand_0905.yml .github/workflows/apply_ablation_refactor_expand_0905_retry.yml
+          git diff --cached --check
+          git commit -m 'refactor and expand ICASSP27 ablation suite 0905 [skip ci]'
+          git push origin HEAD:develop
