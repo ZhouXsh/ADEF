@@ -859,19 +859,48 @@ def train(args, model, generic_dataset, mead_dataset, optimizer, save_dir,
     model.train()
 
     mead_weights = None
-    if args.balance_mead:
-        mead_weights, group_counts = build_mead_sample_weights(
-            mead_dataset, args.balance_power
-        )
-        logging.info("MEAD emotion-level group counts: %s", dict(group_counts))
 
-    # Keep only the current stage's persistent worker pool alive.
-    # Stage 1 creates Generic workers only. MEAD workers are created lazily on
-    # the first MEAD iteration (190001 with the default schedule).
+    # Derive the shared audio/frame unit without constructing MEAD.
+    audio_unit = 16000.0 / float(args.fps)
+    n_audio_samples = round(audio_unit * args.n_motions)
+    n_prev_audio_samples = round(audio_unit * args.n_prev_motions)
+    if generic_dataset is not None and abs(generic_dataset.audio_unit - audio_unit) > 1e-6:
+        raise RuntimeError("Generic audio unit does not match the configured fps")
+
+    def ensure_mead_dataset():
+        nonlocal mead_dataset, mead_weights
+        if mead_dataset is None:
+            logging.info("Loading MEAD dataset after Generic resources have been released")
+            mead_dataset = EmoLevelDataset(
+                args.data_root,
+                motion_filename=args.motion_filename,
+                motion_template_filename=args.motion_template_filename,
+                split="train",
+                coef_fps=args.fps,
+                n_motions=args.n_motions,
+                n_prev_motions=args.n_prev_motions,
+                crop_strategy=args.crop_strategy,
+                normalize_type=args.normalize_type,
+            )
+            if abs(mead_dataset.audio_unit - audio_unit) > 1e-6:
+                raise RuntimeError("MEAD audio unit does not match the configured fps")
+            if args.balance_mead:
+                mead_weights, group_counts = build_mead_sample_weights(
+                    mead_dataset, args.balance_power
+                )
+                logging.info(
+                    "MEAD emotion-level group counts: %s", dict(group_counts)
+                )
+        return mead_dataset
+
+    # Keep only the current stage's persistent worker pool alive. Stage 1 uses
+    # Generic only; MEAD workers and the MEAD motion pickle do not exist yet.
     generic_stream = None
     mead_stream = None
     generic_replay_stream = None
     if start_iter < args.stage1_iter:
+        if generic_dataset is None:
+            raise RuntimeError("Generic dataset is required before the Stage-1 boundary")
         generic_stream = AlternatingBatchStream(
             generic_dataset,
             args.batch_size,
@@ -879,12 +908,8 @@ def train(args, model, generic_dataset, mead_dataset, optimizer, save_dir,
             args.seed + 11,
             start_interval=args.start_interval,
         )
-
-    audio_unit = mead_dataset.audio_unit
-    if abs(generic_dataset.audio_unit - audio_unit) > 1e-6:
-        raise RuntimeError("Generic and MEAD audio units do not match")
-    n_audio_samples = round(audio_unit * args.n_motions)
-    n_prev_audio_samples = round(audio_unit * args.n_prev_motions)
+    else:
+        ensure_mead_dataset()
 
     current_phase = get_training_phase(args, max(1, start_iter))
     if current_phase == 1:
@@ -989,6 +1014,7 @@ def train(args, model, generic_dataset, mead_dataset, optimizer, save_dir,
             data_name = "generic_replay"
         else:
             if mead_stream is None:
+                ensure_mead_dataset()
                 mead_stream = AlternatingBatchStream(
                     mead_dataset,
                     args.batch_size,
@@ -1166,17 +1192,24 @@ def train(args, model, generic_dataset, mead_dataset, optimizer, save_dir,
             for key, value in lr_dict.items():
                 writer.add_scalar(f"opt/lr_{key}", value, iteration)
 
-        # The Stage-1 boundary saves two large checkpoints. Before those writes,
-        # terminate Generic workers and release Generic storage if this variant
-        # will not use Generic replay later. This avoids carrying Stage-1 RAM
-        # into the MEAD phase and avoids a boundary memory spike.
-        if iteration == args.stage1_iter and generic_stream is not None:
-            logging.info("Closing Generic workers before Stage-1 checkpoint save")
-            generic_stream.close()
-            generic_stream = None
-            if args.generic_replay_interval <= 0:
+        # Strict stage boundary: terminate every Generic worker, release the
+        # in-memory Generic motion dictionary, and return allocator pages to the
+        # OS before MEAD is constructed on the next iteration.
+        if iteration == args.stage1_iter:
+            logging.info("Closing and releasing Generic resources at Stage-1 boundary")
+            if generic_stream is not None:
+                generic_stream.close()
+                generic_stream = None
+            if generic_dataset is not None:
                 _release_dataset_storage(generic_dataset)
+                generic_dataset = None
             gc.collect()
+            try:
+                import ctypes
+                ctypes.CDLL("libc.so.6").malloc_trim(0)
+            except (OSError, AttributeError):
+                pass
+            logging.info("Generic resources released; MEAD will be loaded lazily")
 
         # Validation is intentionally disabled for these throughput experiments.
         # No validation DataLoader is constructed and no evaluate() pass is run.
@@ -1413,10 +1446,11 @@ def validate_args(args):
         raise ValueError("No room remains for full MEAD fine-tuning")
     if args.start_interval < 2:
         raise ValueError("start_interval must be at least 2")
-    if args.generic_replay_interval < 0:
-        raise ValueError("generic_replay_interval cannot be negative")
-    if args.generic_replay_interval > 0 and args.gradient_accumulation_steps != 1:
-        raise ValueError("generic replay requires gradient_accumulation_steps=1")
+    if args.generic_replay_interval != 0:
+        raise ValueError(
+            "Ablation scripts use a strict Generic->release->MEAD lifecycle; "
+            "generic replay must remain disabled."
+        )
     if not 0 <= args.generic_replay_emo_index < 8:
         raise ValueError("generic_replay_emo_index must be in [0, 7]")
 
@@ -1472,38 +1506,35 @@ def main(args, option_text=None):
         if start_iter <= args.stage1_iter:
             sync_generic_priors(model, args.shared_condition_warmstart)
 
-    generic_template_path = args.generic_motion_template_path
-    if generic_template_path is None:
-        generic_template_path = Path(args.data_root) / args.motion_template_filename
+    # Stage-aware dataset lifecycle: do not materialize MEAD during Generic Stage 1.
+    # On a Phase-2/3 resume, Generic is skipped entirely.
+    generic_dataset = None
+    if start_iter < args.stage1_iter:
+        generic_template_path = args.generic_motion_template_path
+        if generic_template_path is None:
+            generic_template_path = Path(args.data_root) / args.motion_template_filename
 
-    generic_dataset = GenericTalkingMotionDataset(
-        motion_template_path=generic_template_path,
-        motion_filenames=args.generic_motion_filenames or None,
-        aggregate_motion_files=args.generic_aggregate_motion_files or None,
-        split="train",
-        split_file=args.generic_split_file,
-        validation_ratio=args.generic_validation_ratio,
-        split_seed=args.generic_split_seed,
-        coef_fps=args.fps,
-        n_motions=args.n_motions,
-        n_prev_motions=args.n_prev_motions,
-        crop_strategy=args.crop_strategy,
-        normalize_type=args.normalize_type,
-        strict_absolute_paths=not args.generic_allow_relative_paths,
-        missing_audio_policy=args.generic_missing_audio_policy,
-        duplicate_policy=args.generic_duplicate_policy,
-    )
-    mead_dataset = EmoLevelDataset(
-        args.data_root,
-        motion_filename=args.motion_filename,
-        motion_template_filename=args.motion_template_filename,
-        split="train",
-        coef_fps=args.fps,
-        n_motions=args.n_motions,
-        n_prev_motions=args.n_prev_motions,
-        crop_strategy=args.crop_strategy,
-        normalize_type=args.normalize_type,
-    )
+        generic_dataset = GenericTalkingMotionDataset(
+            motion_template_path=generic_template_path,
+            motion_filenames=args.generic_motion_filenames or None,
+            aggregate_motion_files=args.generic_aggregate_motion_files or None,
+            split="train",
+            split_file=args.generic_split_file,
+            validation_ratio=args.generic_validation_ratio,
+            split_seed=args.generic_split_seed,
+            coef_fps=args.fps,
+            n_motions=args.n_motions,
+            n_prev_motions=args.n_prev_motions,
+            crop_strategy=args.crop_strategy,
+            normalize_type=args.normalize_type,
+            strict_absolute_paths=not args.generic_allow_relative_paths,
+            missing_audio_policy=args.generic_missing_audio_policy,
+            duplicate_policy=args.generic_duplicate_policy,
+        )
+
+    # MEAD is intentionally constructed lazily inside train() only after the
+    # Generic stream/dataset has been closed and released.
+    mead_dataset = None
     # Validation is disabled for the 0901 performance runs. Keeping these as
     # None preserves the train() call signature without loading a second MEAD
     # split or constructing any validation DataLoader.
