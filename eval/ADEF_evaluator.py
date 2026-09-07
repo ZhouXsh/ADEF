@@ -17,6 +17,7 @@ from pathlib import Path
 THIS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(THIS_DIR))
 from paper_protocol import Sample, canonical_emotion, infer_emotion, write_manifest  # noqa: E402
+from paper_table_utils import trim_paper_table  # noqa: E402
 
 PAPER_EVALUATOR = THIS_DIR / "paper_evaluator.py"
 DEFAULT_FATHER = Path("/home/Zhouxishi/VirtualMan_proj/ADEFv4_visual/ADEF_remake")
@@ -63,6 +64,7 @@ def read_pairs(path: Path, fake_root: Path) -> tuple[list[Sample], list[dict], i
 
 
 def update_summary(summary: Path, row: dict):
+    """Persist the full internal row; paper_table.csv is presentation-only."""
     rows = []
     fieldnames = list(row.keys())
     if summary.is_file():
@@ -86,6 +88,16 @@ def _clear_outputs(eval_dir: Path) -> None:
         p = eval_dir / name
         if p.is_file() or p.is_symlink():
             p.unlink()
+
+
+def _load_report(eval_dir: Path) -> dict | None:
+    path = eval_dir / "paper_metrics.json"
+    if not path.is_file():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
 
 
 def parse_args():
@@ -136,21 +148,25 @@ def main() -> int:
         cmd += ["--metrics", *args.metrics]
     rc = subprocess.call(cmd, cwd=str(THIS_DIR))
 
-    table = eval_dir / "paper_table.csv"
-    row = None
-    if table.is_file():
-        with table.open(newline="", encoding="utf-8") as f:
-            row = next(csv.DictReader(f), None)
-        if row:
-            update_summary(Path(args.summary_csv), row)
-            print(f"[ADEF-eval] summary updated: {args.summary_csv}")
-            print(f"[ADEF-eval] status={row.get('Status')} evaluated={row.get('Evaluated-N')}/{row.get('N')}")
+    # paper_table.csv is deliberately presentation-only. Runtime metadata used
+    # for resume/status decisions stays in paper_metrics.json and summary.csv.
+    trim_paper_table(eval_dir / "paper_table.csv")
+    report = _load_report(eval_dir)
+    internal_row = report.get("table_row") if isinstance(report, dict) else None
+    if isinstance(internal_row, dict):
+        update_summary(Path(args.summary_csv), internal_row)
+        print(f"[ADEF-eval] summary updated: {args.summary_csv}")
+        print(
+            f"[ADEF-eval] status={report.get('status')} "
+            f"evaluated={report.get('evaluated_n')}/{report.get('expected_n')}"
+        )
+
     failed = eval_dir / "failed_samples.csv"
     if failed.is_file() and failed.stat().st_size > 0:
         print(f"[ADEF-eval] failed sample report: {failed}", file=sys.stderr)
     if rc != 0:
         print("[ADEF-eval] evaluation failed: at least one requested metric has no usable aggregate", file=sys.stderr)
-    elif row and row.get("Status") == "partial":
+    elif isinstance(report, dict) and report.get("status") == "partial":
         print("[ADEF-eval] partial evaluation: table values use successful samples only", file=sys.stderr)
     return rc
 
