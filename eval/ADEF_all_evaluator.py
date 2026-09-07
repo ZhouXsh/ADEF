@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -37,14 +38,14 @@ def completed(summary: Path) -> set[str]:
 
 
 def _read_status(exam_dir: Path) -> tuple[str | None, int]:
-    table = exam_dir / "paper_eval" / "paper_table.csv"
+    """Read runtime status from JSON; paper_table.csv contains metrics only."""
+    metrics = exam_dir / "paper_eval" / "paper_metrics.json"
     failures = exam_dir / "paper_eval" / "failed_samples.csv"
     status = None
-    if table.is_file():
+    if metrics.is_file():
         try:
-            with table.open(newline="", encoding="utf-8") as f:
-                row = next(csv.DictReader(f), None)
-            status = row.get("Status") if row else None
+            payload = json.loads(metrics.read_text(encoding="utf-8"))
+            status = payload.get("status")
         except Exception:
             status = None
     n_fail = 0
