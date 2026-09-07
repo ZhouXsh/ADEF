@@ -22,6 +22,7 @@ from typing import Optional
 THIS_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(THIS_DIR))
 from paper_protocol import MEAD_SHORT, Sample, canonical_emotion, infer_emotion, write_manifest  # noqa: E402
+from paper_table_utils import trim_paper_table  # noqa: E402
 
 BASELINE_RUNNER = Path("/home/Zhouxishi/VirtualMan_proj/BASELINE/run_baselines.py")
 PAPER_EVALUATOR = THIS_DIR / "paper_evaluator.py"
@@ -155,7 +156,9 @@ def _run_paper(manifest: Path, method: str, outdir: Path, expected_n: int,
            "--expected-n", str(expected_n), "--upstream-failures", str(upstream_failures)]
     if args.metrics:
         cmd += ["--metrics", *args.metrics]
-    return subprocess.call(cmd, cwd=str(THIS_DIR))
+    rc = subprocess.call(cmd, cwd=str(THIS_DIR))
+    trim_paper_table(outdir / "paper_table.csv")
+    return rc
 
 
 def _combine_tables(root: Path, methods: list[str]) -> Optional[Path]:
@@ -184,14 +187,14 @@ def _combine_tables(root: Path, methods: list[str]) -> Optional[Path]:
 
 
 def _read_method_status(method_dir: Path) -> tuple[str | None, int]:
-    table = method_dir / "paper_table.csv"
+    """Read runtime status from JSON; paper_table.csv contains metrics only."""
+    metrics = method_dir / "paper_metrics.json"
     failed = method_dir / "failed_samples.csv"
     status = None
-    if table.is_file():
+    if metrics.is_file():
         try:
-            with table.open(newline="", encoding="utf-8") as f:
-                row = next(csv.DictReader(f), None)
-            status = row.get("Status") if row else None
+            payload = json.loads(metrics.read_text(encoding="utf-8"))
+            status = payload.get("status")
         except Exception:
             pass
     n_fail = 0
