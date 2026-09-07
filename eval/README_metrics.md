@@ -10,15 +10,7 @@ python eval/ADEF_all_evaluator.py --pairs-file /path/to/pairs.txt
 
 ## v3：失败样本不再导致整项清空
 
-每个指标只使用该指标成功的样本计算最终值，并显式记录 coverage：
-
-- `LSE-N`：成功得到 LSE-D/LSE-C 的视频数；
-- `FID-N`：进入 FID real/fake 两个分布的成功配对视频数；
-- `FVD-N`：进入 I3D/FVD 分布的成功配对视频数；
-- `PSNR-N` / `SSIM-N` / `LPIPS-N`：各指标至少有一个有效 EAT 对齐帧的视频数；
-- `LMD-N`：至少有一个有效 dlib landmark 帧的视频数；
-- `EmotiEff-N`：成功得到主导情感且存在目标标签的视频数；
-- `DFER-N`：成功推理且目标属于 DFER-CLIP 七类的视频数。MEAD `contempt` 不属于 DFER-CLIP 标签空间，因此不进入分母，也不算失败。
+每个指标只使用该指标成功的样本计算最终值。成功样本数、状态、协议版本和 manifest fingerprint 属于运行元数据，不再写入 `paper_table.csv`，而是保留在 `paper_metrics.json` 和 ADEF 的内部 `summary.csv` 中。
 
 每次评估额外生成：
 
@@ -62,14 +54,38 @@ PSNR/SSIM/LPIPS 和 LMD 分开记录成功覆盖。例如某视频 EAT pixel ali
 每个方法/实验目录包含：
 
 ```text
-paper_table.csv       # 汇总表，包含每项 coverage N
-paper_metrics.json    # 完整协议、aggregate、coverage、failures、子进程信息
+paper_table.csv       # 论文展示表：仅 Method + 评估指标值
+paper_metrics.json    # 完整协议、status、coverage、aggregate、failures、子进程信息
 per_video.csv         # 每视频结果
 failed_samples.csv    # 失败样本和原因
 work/                 # 各 evaluator 中间 JSON/manifest
 ```
 
-`N` 是原始请求样本数；`Evaluated-N` 是进入统一 metric evaluation 的视频数。baseline 生成失败或 ADEF fake 缺失都会进入 upstream failure，再进入 `failed_samples.csv`，不会让其余成功视频被丢弃。
+`paper_table.csv` 当前列固定为：
+
+```text
+Method,
+LSE-D,LSE-C,
+FID,FVD,
+PSNR,SSIM,LPIPS,
+M-LMD,F-LMD,
+EmotiEff-Acc,DFER-CLIP-Acc
+```
+
+以下信息不再写入论文表：
+
+```text
+Status
+N
+Evaluated-N
+LSE-N / FID-N / FVD-N
+PSNR-N / SSIM-N / LPIPS-N / LMD-N
+EmotiEff-N / DFER-N
+Protocol
+Manifest-SHA256
+```
+
+这些运行元数据仍完整保留在 `paper_metrics.json`；ADEF 批量续跑所需的 `Status / Protocol` 等信息保留在内部 `summary.csv`。因此精简论文表不会影响 `ADEF_all_evaluator.py` 判断哪些实验需要重跑。
 
 ## 运行前检查
 
