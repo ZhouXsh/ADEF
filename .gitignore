@@ -244,6 +244,8 @@ generate.py
 # ---------- Inside /eval/: test results & runtime outputs ----------
 # RESULT/ holds per-method output videos + summary CSVs
 /eval/RESULT/
+/eval/RESULT-old/
+/eval/RESULT-0907/
 /eval/eval_reports/
 /eval/reports/test/
 
@@ -294,7 +296,6 @@ generate.py
 /eval/LSE_MEAD.jsonl
 /eval/LSE_MEAD.xlsx
 /eval/test.json
-/eval/my_double.txt
 /eval/emonet/emonet_eval_results.json
 /eval/pytorch-fid/results.json
 /eval/frechet_video_distance/fvd_result.json

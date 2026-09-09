@@ -3,7 +3,7 @@ import subprocess
 import sys
 import time
 
-exam_name = '20260720_emotion_dit_Unification'
+exam_name = '20260904_fusion_balanced_decay_ema'
 
 from src.config.emotion_config import global_emo_list
 emo_list = global_emo_list
@@ -48,7 +48,7 @@ def ouT():
     image = 'assets/examples/image/白人男.jpg'
     for i in range(len(emo_list)):
         audio_angry = f'/home/Zhouxishi/VirtualMan_proj/ADEFv4/src/dataset/MEAD11/videos/M003/front/{emo_list[i]}/level_3/M003_front_{emo_list[i]}_level_3_001.wav'
-        exec_emo(image, audio_angry, outdir, emo_list[i], False, 1, False, i % 2,
+        exec_emo(image, audio_angry, outdir, emo_list[i], False, 1, False, 0,
                  task_desc=f'ouT [{i+1}/{len(emo_list)}] {emo_list[i]}')
     audio = f'/home/Zhouxishi/VirtualMan_proj/ADEFv4/src/dataset/MEAD11/videos/M003/front/neutral/level_1/M003_front_neutral_level_1_001.wav'
     exec_emo(image, audio, outdir, 'neutral', False, 1, False, device_id=0,
@@ -60,12 +60,47 @@ def inT():
     for i in range(len(emo_list)):
         image = f'/home/Zhouxishi/VirtualMan_proj/ADEFv4/src/dataset/MEAD11/first_frame/M003_front_{emo_list[i]}_level_3_001.png'
         audio = f'/home/Zhouxishi/VirtualMan_proj/ADEFv4/src/dataset/MEAD11/videos/M003/front/{emo_list[i]}/level_3/M003_front_{emo_list[i]}_level_3_001.wav'
-        exec_emo(image, audio, outdir, emo_list[i], False, 1, False, device_id=i % 2,
+        exec_emo(image, audio, outdir, emo_list[i], False, 1, False, device_id=0,
                  task_desc=f'inT [{i+1}/{len(emo_list)}] {emo_list[i]}')
     image = f'/home/Zhouxishi/VirtualMan_proj/ADEFv4/src/dataset/MEAD11/first_frame/M003_front_neutral_level_1_001.png'
     audio = f'/home/Zhouxishi/VirtualMan_proj/ADEFv4/src/dataset/MEAD11/videos/M003/front/neutral/level_1/M003_front_neutral_level_1_001.wav'
     exec_emo(image, audio, outdir, 'neutral', False, 1, False, device_id=0,
              task_desc=f'inT [{len(emo_list)+1}/{len(emo_list)+1}] neutral')
+
+
+def HDTF():
+    print('\n>>> HDTF: high-definition transfer')
+    image = '/home/Zhouxishi/VirtualMan_proj/dataset/HDTF_Processed/first_frame/RD_Radio4_000.png'
+    audio = '/home/Zhouxishi/VirtualMan_proj/dataset/HDTF_Processed/videos/RD_Radio4_000.wav'
+    for i in range(len(emo_list)):
+        exec_emo(image, audio, outdir, emo_list[i], False, 1, False, device_id=0,
+                 task_desc=f'HDTF [{i+1}/{len(emo_list)}] {emo_list[i]}')
+
+
+def RAVDESS():
+    audio_lists = [
+        '/home/Zhouxishi/VirtualMan_proj/dataset/RAVDESS_Processed/videos/Actor01/front/angry/level_2/Actor01_front_angry_level_2_01_01_01.mp4',
+        '/home/Zhouxishi/VirtualMan_proj/dataset/RAVDESS_Processed/videos/Actor01/front/calm/level_2/Actor01_front_calm_level_2_01_01_01.mp4',
+        '/home/Zhouxishi/VirtualMan_proj/dataset/RAVDESS_Processed/videos/Actor01/front/disgusted/level_2/Actor01_front_disgusted_level_2_01_01_01.mp4',
+        '/home/Zhouxishi/VirtualMan_proj/dataset/RAVDESS_Processed/videos/Actor01/front/fear/level_2/Actor01_front_fear_level_2_01_01_01.mp4',
+        '/home/Zhouxishi/VirtualMan_proj/dataset/RAVDESS_Processed/videos/Actor01/front/happy/level_2/Actor01_front_happy_level_2_01_01_01.mp4',
+        '/home/Zhouxishi/VirtualMan_proj/dataset/RAVDESS_Processed/videos/Actor01/front/neutral/level_1/Actor01_front_neutral_level_1_01_01_01.mp4',
+        '/home/Zhouxishi/VirtualMan_proj/dataset/RAVDESS_Processed/videos/Actor01/front/sad/level_2/Actor01_front_sad_level_2_01_01_01.mp4',
+        '/home/Zhouxishi/VirtualMan_proj/dataset/RAVDESS_Processed/videos/Actor01/front/surprised/level_2/Actor01_front_surprised_level_2_01_01_01.mp4'
+    ]
+    image_lists = [
+        '/home/Zhouxishi/VirtualMan_proj/dataset/RAVDESS_Processed/first_frame/Actor01_front_angry_level_2_01_01_01.png',
+        '/home/Zhouxishi/VirtualMan_proj/dataset/RAVDESS_Processed/first_frame/Actor01_front_calm_level_2_01_01_01.png',
+        '/home/Zhouxishi/VirtualMan_proj/dataset/RAVDESS_Processed/first_frame/Actor01_front_disgusted_level_2_01_01_01.png',
+        '/home/Zhouxishi/VirtualMan_proj/dataset/RAVDESS_Processed/first_frame/Actor01_front_fear_level_2_01_01_01.png',
+        '/home/Zhouxishi/VirtualMan_proj/dataset/RAVDESS_Processed/first_frame/Actor01_front_happy_level_2_01_01_01.png',
+        '/home/Zhouxishi/VirtualMan_proj/dataset/RAVDESS_Processed/first_frame/Actor01_front_neutral_level_1_01_01_01.png',
+        '/home/Zhouxishi/VirtualMan_proj/dataset/RAVDESS_Processed/first_frame/Actor01_front_sad_level_2_01_01_01.png',
+        '/home/Zhouxishi/VirtualMan_proj/dataset/RAVDESS_Processed/first_frame/Actor01_front_surprised_level_2_01_01_01.png'
+    ]
+    for i in range(len(emo_list)):
+        exec_emo(image_lists[i], audio_lists[i], outdir, emo_list[i], False, 1, False, device_id=0,
+                 task_desc=f'RAVDESS [{i+1}/{len(emo_list)}] {emo_list[i]}')
 
 
 if __name__ == '__main__':
@@ -76,6 +111,8 @@ if __name__ == '__main__':
 
     ouT()
     inT()
+    # HDTF()
+    # RAVDESS()
 
     total = time.time() - total_start
     print(f'\nAll done in {total:.1f}s')

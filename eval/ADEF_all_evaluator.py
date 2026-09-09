@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
 """Run paper protocol v3 over all ADEF experiment directories.
 
-Both ``complete`` and ``partial`` rows are considered finished because partial
-rows already contain aggregates over successful samples plus an explicit
-failure report. Only ``failed`` rows are automatically retried next run.
+ADEF experiments already contain generated fake videos. Input may be either:
+- ``image,audio,gt_video[,emotion]`` via --triples-file; or
+- legacy ``fake_filename,gt_video[,emotion]`` via --pairs-file.
+
+Both complete and partial rows are considered finished because partial rows
+already contain aggregates over successful samples plus an explicit failure
+report. Only failed rows are automatically retried next run.
 """
 from __future__ import annotations
 
@@ -62,7 +66,15 @@ def parse_args():
     p = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     p.add_argument("--father-dir", default=str(DEFAULT_FATHER))
     p.add_argument("--summary-csv", default=str(DEFAULT_SUMMARY))
-    p.add_argument("--pairs-file", required=True)
+    src = p.add_mutually_exclusive_group(required=True)
+    src.add_argument(
+        "--triples-file",
+        help="image,audio,gt_video[,emotion]; ADEF fakes are resolved inside each experiment",
+    )
+    src.add_argument(
+        "--pairs-file",
+        help="Legacy fake,gt[,emotion]. Triples are also auto-detected for compatibility.",
+    )
     p.add_argument("--metrics", nargs="+", default=None,
                    choices=["lse", "fid", "fvd", "pairwise", "emotiefflib", "dfer_clip"])
     p.add_argument("--device", default=None)
@@ -89,12 +101,15 @@ def main() -> int:
         todo = todo[:max(0, args.limit)]
     print(f"[ADEF-all] protocol={PROTOCOL_VERSION} exams={len(exams)} done={len(done)} todo={len(todo)}")
 
+    input_flag = "--triples-file" if args.triples_file else "--pairs-file"
+    input_path = args.triples_file or args.pairs_file
+
     rc_total = 0
     n_complete = n_partial = n_failed = 0
     for i, exam in enumerate(todo, 1):
         cmd = [sys.executable, str(ADEF_EVALUATOR), exam,
                "--father-dir", str(father), "--summary-csv", args.summary_csv,
-               "--pairs-file", args.pairs_file]
+               input_flag, input_path]
         if args.metrics:
             cmd += ["--metrics", *args.metrics]
         if args.device:

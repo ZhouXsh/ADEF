@@ -1276,7 +1276,7 @@ def build_parser():
     parser.add_argument("--mode", type=str, default="train", choices=["train"])
     parser.add_argument("--exp_name", type=str, default=DEFAULT_EXP_NAME)
     parser.add_argument("--model_variant", type=str, default="emotion_dit_ablation0905_shared_start_tokens")
-    parser.add_argument("--device_id", type=int, default=4)
+    parser.add_argument("--device_id", type=int, default=1)
     parser.add_argument("--seed", type=int, default=2026)
     parser.add_argument("--resume_checkpoint", type=Path, default=None)
 
