@@ -4,25 +4,32 @@ import subprocess
 import sys
 import time
 
-exam_name = '20260905_ablation_cond_dit_adaln'
-
 from src.config.emotion_config import global_emo_list
+
 emo_list = global_emo_list
 father = '/home/Zhouxishi/VirtualMan_proj/ADEFv4_visual/ADEF_remake'
-outdir = f'{father}/{exam_name}'
-os.makedirs(outdir, exist_ok=True)
+CHECKPOINT_ROOT = '/home/Zhouxishi/VirtualMan_proj/ADEF_remake/experiments/emo_dit'
+CHECKPOINT_FILENAME = 'iter_0435000.pt'
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        '--motion_checkpoint', '--motion_ckpt',
-        dest='motion_checkpoint',
+        '--exam_name',
         type=str,
         required=True,
-        help='Motion-generator checkpoint fixed for this entire batch run.',
+        help='Experiment name used to derive the checkpoint and output directory.',
     )
     return parser.parse_args()
+
+
+def build_motion_checkpoint(exam_name):
+    return os.path.join(
+        CHECKPOINT_ROOT,
+        exam_name,
+        'checkpoints',
+        CHECKPOINT_FILENAME,
+    )
 
 
 def exec_emo(image_path, audio_path, out_dir='.', emotion='angry',
@@ -62,7 +69,7 @@ def exec_emo(image_path, audio_path, out_dir='.', emotion='angry',
     return result.returncode
 
 
-def inT(motion_checkpoint):
+def inT(outdir, motion_checkpoint):
     print('\n>>> inT: identity-preserving emotion transfer')
     for i in range(len(emo_list)):
         image = f'/home/Zhouxishi/VirtualMan_proj/ADEFv4/src/dataset/MEAD11/first_frame/M003_front_{emo_list[i]}_level_3_001.png'
@@ -79,9 +86,13 @@ def inT(motion_checkpoint):
 
 if __name__ == '__main__':
     args = parse_args()
-    motion_checkpoint = os.path.abspath(os.path.expanduser(args.motion_checkpoint))
+    exam_name = args.exam_name
+    outdir = os.path.join(father, exam_name)
+    motion_checkpoint = build_motion_checkpoint(exam_name)
+
     if not os.path.isfile(motion_checkpoint):
         raise FileNotFoundError(f'motion checkpoint not found: {motion_checkpoint}')
+    os.makedirs(outdir, exist_ok=True)
 
     print(f'exam: {exam_name}')
     print(f'output: {outdir}')
@@ -89,7 +100,7 @@ if __name__ == '__main__':
     print(f'motion checkpoint: {motion_checkpoint}')
     total_start = time.time()
 
-    inT(motion_checkpoint)
+    inT(outdir, motion_checkpoint)
 
     total = time.time() - total_start
     print(f'\nAll done in {total:.1f}s')
