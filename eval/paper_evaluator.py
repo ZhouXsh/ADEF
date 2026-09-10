@@ -69,17 +69,42 @@ def _python(preferred: Path) -> str:
     return str(preferred) if preferred.is_file() else sys.executable
 
 
-def _run(cmd: list[str], *, cwd: Path | None = None, timeout: int = 7200) -> dict[str, Any]:
+def _to_text(value):
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
+def _run(cmd, *, cwd=None, timeout=7200):
     t0 = time.time()
     try:
-        p = subprocess.run(cmd, cwd=str(cwd) if cwd else None, capture_output=True,
-                           text=True, timeout=timeout)
-        return {"rc": p.returncode, "stdout": p.stdout, "stderr": p.stderr,
-                "elapsed_sec": time.time() - t0, "cmd": cmd}
+        p = subprocess.run(
+            cmd,
+            cwd=str(cwd) if cwd else None,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+        return {
+            "rc": p.returncode,
+            "stdout": _to_text(p.stdout),
+            "stderr": _to_text(p.stderr),
+            "elapsed_sec": time.time() - t0,
+            "cmd": [str(x) for x in cmd],
+        }
     except subprocess.TimeoutExpired as exc:
-        return {"rc": 124, "stdout": exc.stdout or "", "stderr": f"timeout after {timeout}s",
-                "elapsed_sec": time.time() - t0, "cmd": cmd}
-
+        return {
+            "rc": 124,
+            "stdout": _to_text(exc.stdout),
+            "stderr": (
+                f"timeout after {timeout}s"
+                + (f"\n{_to_text(exc.stderr)}" if exc.stderr else "")
+            ),
+            "elapsed_sec": time.time() - t0,
+            "cmd": [str(x) for x in cmd],
+        }
 
 def _load_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
