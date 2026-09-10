@@ -47,7 +47,7 @@ def exec_emo(image_path, audio_path, out_dir='.', emotion='angry',
         '--cfg_scale', '2.0',
         '--output_dir', out_dir,
         '--device_id', str(device_id),
-        '--motion_ckpt', motion_checkpoint,
+        '--motion-checkpoint', motion_checkpoint,
     ]
     print(f'\n{"="*60}')
     print(f'[START] {task_desc}')
