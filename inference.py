@@ -28,6 +28,8 @@ def fast_check_args(args: ArgumentConfig):       # 检查参数
         raise FileNotFoundError(f"reference info not found: {args.reference}")
     if not osp.exists(args.audio):
         raise FileNotFoundError(f"audio info not found: {args.audio}")
+    if args.motion_checkpoint is not None and not osp.isfile(args.motion_checkpoint):
+        raise FileNotFoundError(f"motion checkpoint not found: {args.motion_checkpoint}")
 
 def main():
     # set tyro theme
@@ -47,6 +49,13 @@ def main():
 
     # specify configs for inference   指定推理的配置
     inference_cfg = partial_fields(InferenceConfig, args.__dict__)    # 从args.__dict__选取InferenceConfig对应的字段 组成的字典
+    if args.motion_checkpoint is not None:
+        # Explicit CLI checkpoint has priority over inference_config.py. This
+        # makes subprocess-based batch runs immune to config edits made after
+        # the parent process has started.
+        inference_cfg.checkpoint_MotionGenerator = osp.abspath(
+            osp.expanduser(args.motion_checkpoint)
+        )
     crop_cfg = partial_fields(CropConfig, args.__dict__)
 
     # init pipeline
