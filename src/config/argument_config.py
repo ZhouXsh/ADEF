@@ -66,6 +66,7 @@ class ArgumentConfig(PrintableConfig):
     vy_ratio_crop_driving_video: float = -0.1  # adjust x offset
 
     ########## moiton generator 运动生成器 #############
+    motion_checkpoint: Annotated[Optional[str], tyro.conf.arg(aliases=["--motion_ckpt"])] = None  # optional CLI override for InferenceConfig.checkpoint_MotionGenerator
     cfg_mode: str = "incremental" # "incremental", "independent"
     cfg_cond = None
     cfg_scale: Union[float, list[float]] = 2.8
