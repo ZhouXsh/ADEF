@@ -1,3 +1,4 @@
+import argparse
 import os
 import subprocess
 import sys
@@ -17,9 +18,32 @@ os.makedirs(outdir, exist_ok=True)
 TRIPLES_FILE = '/home/Zhouxishi/VirtualMan_proj/ADEF_remake/eval/my_final_triples.txt'
 
 
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '--motion_checkpoint', '--motion_ckpt',
+        dest='motion_checkpoint',
+        type=str,
+        required=True,
+        help='Motion-generator checkpoint fixed for this entire batch run.',
+    )
+    parser.add_argument(
+        '--triples_file',
+        type=str,
+        default=TRIPLES_FILE,
+        help='Comma-separated (reference_image, audio, gt_video) list.',
+    )
+    parser.add_argument('--device_id', type=int, default=0)
+    return parser.parse_args()
+
+
 def exec_emo(image_path, audio_path, out_dir='.', emotion='angry',
              use_emo_enhancer=False, enhance_level=1,
-             use_emo_analyzer=False, device_id=1, task_desc=''):
+             use_emo_analyzer=False, device_id=1, task_desc='',
+             motion_checkpoint=None):
+    if motion_checkpoint is None:
+        raise ValueError('motion_checkpoint must be provided for batch inference')
+
     cmd = [
         sys.executable, 'inference.py',
         '-r', image_path,
@@ -28,12 +52,14 @@ def exec_emo(image_path, audio_path, out_dir='.', emotion='angry',
         '--cfg_scale', '2.0',
         '--output_dir', out_dir,
         '--device_id', str(device_id),
+        '--motion_ckpt', motion_checkpoint,
     ]
     print(f'\n{"="*60}')
     print(f'[START] {task_desc}')
     print(f'  image: {os.path.basename(image_path)}')
     print(f'  audio: {os.path.basename(audio_path)}')
     print(f'  emotion: {emotion}, device: {device_id}')
+    print(f'  motion checkpoint: {motion_checkpoint}')
     print(f'{"="*60}')
 
     start = time.time()
@@ -61,10 +87,13 @@ def parse_emotion(audio_path):
     return parts[2]
 
 
-def run_triples(triples_path=TRIPLES_FILE, device_id=0):
+def run_triples(triples_path=TRIPLES_FILE, device_id=0, motion_checkpoint=None):
     """Read each (image, audio, gt_video) line from `triples_path`, derive the
     emotion label from the audio filename, and run inference. Outputs land in
     `outdir`."""
+    if motion_checkpoint is None:
+        raise ValueError('motion_checkpoint must be provided for batch inference')
+
     print(f'\n>>> run_triples: {triples_path}')
     with open(triples_path, 'r') as f:
         lines = [ln.strip() for ln in f if ln.strip()]
@@ -82,19 +111,33 @@ def run_triples(triples_path=TRIPLES_FILE, device_id=0):
         rc = exec_emo(image_path, audio_path, outdir, emotion, False, 1, False,
                       device_id=device_id,
                       task_desc=f'triples [{i}/{total}] {emotion} '
-                                f'{os.path.basename(image_path)}')
+                                f'{os.path.basename(image_path)}',
+                      motion_checkpoint=motion_checkpoint)
         if rc == 0:
             success += 1
     print(f'\n>>> run_triples done: {success}/{total} succeeded')
 
 
 if __name__ == '__main__':
+    args = parse_args()
+    motion_checkpoint = os.path.abspath(os.path.expanduser(args.motion_checkpoint))
+    triples_file = os.path.abspath(os.path.expanduser(args.triples_file))
+    if not os.path.isfile(motion_checkpoint):
+        raise FileNotFoundError(f'motion checkpoint not found: {motion_checkpoint}')
+    if not os.path.isfile(triples_file):
+        raise FileNotFoundError(f'triples file not found: {triples_file}')
+
     print(f'exam: {exam_name}')
     print(f'output: {outdir}')
-    print(f'triples: {TRIPLES_FILE}')
+    print(f'triples: {triples_file}')
+    print(f'motion checkpoint: {motion_checkpoint}')
     total_start = time.time()
 
-    run_triples()
+    run_triples(
+        triples_path=triples_file,
+        device_id=args.device_id,
+        motion_checkpoint=motion_checkpoint,
+    )
 
     total = time.time() - total_start
     print(f'\nAll done in {total:.1f}s')
