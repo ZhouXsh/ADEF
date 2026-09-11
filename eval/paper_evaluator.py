@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """Authoritative paper-table evaluator for ADEF and all baselines.
 
-Protocol v3 keeps usable results when individual samples fail. Each metric is
-aggregated over its own successful sample subset and exposes an explicit
-coverage count in the paper table. All sample-level failures are written to
-``failed_samples.csv`` and printed to stderr.
+Protocol v4 uses a record-first evaluation rule:
+- retain one record per video with frame counts, metric values and participation;
+- aggregate paper-facing scalar metrics only after the corresponding video-level
+  records are complete;
+- keep FID/FVD as standard dataset-level Frechet metrics over successful pairs.
+
+Sample failures are excluded only from the affected metric aggregate.  All
+failures remain explicit in ``failed_samples.csv``.
 
 Status meanings:
 - complete: every eligible sample succeeded for every requested metric.
@@ -35,6 +39,7 @@ from paper_protocol import (  # noqa: E402
     manifest_fingerprint,
     read_manifest,
 )
+from paper_table_utils import trim_paper_table  # noqa: E402
 
 LSE_SCRIPT = THIS_DIR / "Wav2Lip" / "evaluation" / "eval_lipsync.py"
 FID_SCRIPT = THIS_DIR / "pytorch-fid" / "evaluate_fid_video.py"
@@ -77,7 +82,7 @@ def _to_text(value):
     return str(value)
 
 
-def _run(cmd, *, cwd=None, timeout=7200):
+def _run(cmd, *, cwd=None, timeout: int | None = 7200):
     t0 = time.time()
     try:
         p = subprocess.run(
@@ -105,6 +110,7 @@ def _run(cmd, *, cwd=None, timeout=7200):
             "elapsed_sec": time.time() - t0,
             "cmd": [str(x) for x in cmd],
         }
+
 
 def _load_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
@@ -319,7 +325,8 @@ def evaluate(samples: list[Sample], method: str, outdir: Path, metrics: list[str
         out.unlink(missing_ok=True)
         cmd = [args.pairwise_python, str(PAIRWISE_SCRIPT), "--manifest", str(manifest),
                "--output", str(out), "--device", args.device]
-        proc = _run(cmd, cwd=THIS_DIR, timeout=args.timeout)
+        pairwise_timeout = args.pairwise_timeout if args.pairwise_timeout > 0 else None
+        proc = _run(cmd, cwd=THIS_DIR, timeout=pairwise_timeout)
         data, load_err = _load_json_if_present(out)
         if data is None:
             msg = f"Pairwise unavailable: {load_err}; rc={proc['rc']} {_proc_tail(proc)}"
@@ -392,12 +399,12 @@ def evaluate(samples: list[Sample], method: str, outdir: Path, metrics: list[str
                     successful_labelled += 1
                     is_correct = str(pred).lower() == str(label).lower()
                     correct += int(is_correct)
-                    r["correct_v3"] = is_correct
+                    r["correct_v4"] = is_correct
                 if s:
-                    per_video[s.name]["EmotiEff-Correct"] = r.get("correct_v3")
+                    per_video[s.name]["EmotiEff-Correct"] = r.get("correct_v4")
                     per_video[s.name]["EmotiEff-Pred"] = pred
-            data["accuracy_v3"] = (correct / successful_labelled) if successful_labelled else None
-            data["n_success_v3"] = successful_labelled
+            data["accuracy_v4"] = (correct / successful_labelled) if successful_labelled else None
+            data["n_success_v4"] = successful_labelled
             data["process"] = proc
             details["emotiefflib"] = data
             coverage["emotieff"] = successful_labelled
@@ -443,13 +450,13 @@ def evaluate(samples: list[Sample], method: str, outdir: Path, metrics: list[str
                     successful_supported += 1
                     is_correct = str(pred).lower() == str(label).lower()
                     correct += int(is_correct)
-                    r["correct_v3"] = is_correct
+                    r["correct_v4"] = is_correct
                 if s:
-                    per_video[s.name]["DFER-Correct"] = r.get("correct_v3")
+                    per_video[s.name]["DFER-Correct"] = r.get("correct_v4")
                     per_video[s.name]["DFER-Pred"] = pred
                     per_video[s.name]["DFER-Label-Supported"] = True
-            data["accuracy_v3"] = (correct / successful_supported) if successful_supported else None
-            data["n_success_supported_v3"] = successful_supported
+            data["accuracy_v4"] = (correct / successful_supported) if successful_supported else None
+            data["n_success_supported_v4"] = successful_supported
             data["process"] = proc
             details["dfer_clip"] = data
             coverage["dfer"] = successful_supported
@@ -488,9 +495,9 @@ def evaluate(samples: list[Sample], method: str, outdir: Path, metrics: list[str
         "LPIPS": _mean(pair, "lpips"), "LPIPS-N": coverage.get("lpips"),
         "M-LMD": _mean(pair, "mouth_lmd"), "F-LMD": _mean(pair, "face_lmd"),
         "LMD-N": coverage.get("lmd"),
-        "EmotiEff-Acc": emot.get("accuracy_v3") if isinstance(emot, dict) else None,
+        "EmotiEff-Acc": emot.get("accuracy_v4") if isinstance(emot, dict) else None,
         "EmotiEff-N": coverage.get("emotieff"),
-        "DFER-CLIP-Acc": dfer.get("accuracy_v3") if isinstance(dfer, dict) else None,
+        "DFER-CLIP-Acc": dfer.get("accuracy_v4") if isinstance(dfer, dict) else None,
         "DFER-N": coverage.get("dfer"),
         "Protocol": PROTOCOL_VERSION,
         "Manifest-SHA256": manifest_fingerprint(
@@ -541,7 +548,10 @@ def parse_args():
     p.add_argument("--fvd-python", default=_python(DEFAULT_FVD_PY))
     p.add_argument("--lse-python", default=_python(DEFAULT_LSE_PY))
     p.add_argument("--pairwise-python", default=_python(DEFAULT_PAIRWISE_PY) if DEFAULT_PAIRWISE_PY.is_file() else _python(DEFAULT_EVAL_PY))
-    p.add_argument("--timeout", type=int, default=7200)
+    p.add_argument("--timeout", type=int, default=7200,
+                   help="Per-metric timeout for LSE/FID/FVD/emotion metrics.")
+    p.add_argument("--pairwise-timeout", type=int, default=0,
+                   help="Pairwise timeout in seconds; 0 disables the timeout so 800+ video runs can finish/resume safely.")
     p.add_argument("--lse-min-track", type=int, default=5)
     p.add_argument("--fid-frame-stride", type=int, default=1)
     p.add_argument("--fvd-video-length", type=int, default=16)
@@ -563,19 +573,32 @@ def main() -> int:
     t0 = time.time()
     row, report = evaluate(samples, args.method, outdir, list(args.metrics), args)
     report["elapsed_sec"] = time.time() - t0
-    (outdir / "paper_metrics.json").write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
-    _write_csv(outdir / "paper_table.csv", [row], TABLE_COLUMNS)
+    metrics_path = outdir / "paper_metrics.json"
+    table_path = outdir / "paper_table.csv"
+    metrics_path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+    _write_csv(table_path, [row], TABLE_COLUMNS)
     _write_csv(outdir / "per_video.csv", report["per_video"])
     _write_csv(outdir / "failed_samples.csv", report["failures"], FAILURE_COLUMNS)
 
+    # Protocol v4 finalization: merge authoritative metric-specific records into
+    # one per-video table, then derive paper-facing means from those records.
+    trim_paper_table(table_path)
+    try:
+        finalized = _load_json(metrics_path)
+        report = finalized
+        row = finalized.get("table_row", row)
+    except Exception:
+        pass
+
     print(f"[paper-eval] method={args.method} status={row['Status']} N={row['N']} evaluated={row['Evaluated-N']}")
-    print(f"[paper-eval] table: {outdir / 'paper_table.csv'}")
-    if report["failures"]:
+    print(f"[paper-eval] table: {table_path}")
+    print(f"[paper-eval] per-video records: {outdir / 'per_video.csv'}")
+    if report.get("failures"):
         print(f"[paper-eval] failed samples: {outdir / 'failed_samples.csv'}", file=sys.stderr)
         for f in report["failures"]:
             label = f.get("name") or f.get("fake") or "<global>"
             print(f"  FAIL [{f.get('metric')}] {label}: {f.get('error')}", file=sys.stderr)
-    if report["hard_errors"]:
+    if report.get("hard_errors"):
         for e in report["hard_errors"]:
             print(f"  ERROR: {e}", file=sys.stderr)
     return 2 if row["Status"] == "failed" else 0
