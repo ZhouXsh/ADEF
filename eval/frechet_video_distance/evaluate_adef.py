@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 # coding=utf-8
-"""Dataset-level FVD with pairwise failure exclusion.
+"""Dataset-level FVD with pairwise failure exclusion and per-video bookkeeping.
 
 In paired-list mode, unreadable real/fake pairs are skipped together so the
-Fréchet statistics use the same successful sample subset on both sides.
+Frechet statistics use the same successful sample subset on both sides. The
+final FVD remains one dataset-level value; per-video records only describe
+source frame counts, sampled-frame counts and participation.
 """
 from __future__ import absolute_import, division, print_function
 
@@ -97,6 +99,7 @@ def _read_frames(path):
 
 def load_video(path, target_length=16, image_size=IMAGE_SIZE):
     frames = _read_frames(path)
+    source_frames = len(frames)
     if target_length is not None:
         indices = np.linspace(0, len(frames) - 1, target_length).round().astype(int)
         frames = [frames[i] for i in indices]
@@ -104,7 +107,7 @@ def load_video(path, target_length=16, image_size=IMAGE_SIZE):
     arr = np.empty((len(frames), image_size, image_size, 3), dtype=np.uint8)
     for i, frame in enumerate(frames):
         arr[i] = cv2.resize(frame, (image_size, image_size), interpolation=cv2.INTER_LINEAR)
-    return arr
+    return arr, source_frames
 
 
 def _pad_to_batch(arr, batch_size):
@@ -154,6 +157,7 @@ def main():
         "video_length": args.video_length,
         "i3d_batch_size": I3D_BATCH_SIZE,
         "failures": [],
+        "per_video": [],
     }
     try:
         if bool(args.real_list) != bool(args.fake_list):
@@ -178,15 +182,32 @@ def main():
         for i, (rp, fp) in enumerate(zip(real_paths, fake_paths)):
             if not args.quiet:
                 print("[FVD] %d/%d %s | %s" % (i + 1, len(real_paths), os.path.basename(rp), os.path.basename(fp)))
+            row = {
+                "index": i,
+                "real": rp,
+                "fake": fp,
+                "real_frames": None,
+                "fake_frames": None,
+                "sampled_frames": None,
+                "included": False,
+                "error": None,
+            }
             try:
-                rr = load_video(rp, args.video_length)
-                ff = load_video(fp, args.video_length)
+                rr, nr = load_video(rp, args.video_length)
+                ff, nf = load_video(fp, args.video_length)
+                row["real_frames"] = nr
+                row["fake_frames"] = nf
+                row["sampled_frames"] = args.video_length
             except Exception as exc:
+                error = "%s: %s" % (type(exc).__name__, exc)
+                row["error"] = error
                 result["failures"].append({
-                    "index": i, "real": rp, "fake": fp,
-                    "error": "%s: %s" % (type(exc).__name__, exc),
+                    "index": i, "real": rp, "fake": fp, "error": error,
                 })
+                result["per_video"].append(row)
                 continue
+            row["included"] = True
+            result["per_video"].append(row)
             real_arr.append(rr)
             fake_arr.append(ff)
 
