@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-"""Run paper protocol v3 over all ADEF experiment directories.
+"""Run paper protocol v4 over all ADEF experiment directories.
 
 ADEF experiments already contain generated fake videos. Input may be either:
 - ``image,audio,gt_video[,emotion]`` via --triples-file; or
 - legacy ``fake_filename,gt_video[,emotion]`` via --pairs-file.
+
+Protocol v4 records video-level metric values and frame counts first, then
+aggregates paper-facing means over successful videos. FID/FVD remain standard
+dataset-level Frechet metrics over successful real/fake pairs.
 
 Both complete and partial rows are considered finished because partial rows
 already contain aggregates over successful samples plus an explicit failure
