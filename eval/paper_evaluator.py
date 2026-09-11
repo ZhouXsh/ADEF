@@ -7,8 +7,14 @@ Protocol v4 uses a record-first evaluation rule:
   records are complete;
 - keep FID/FVD as standard dataset-level Frechet metrics over successful pairs.
 
-Sample failures are excluded only from the affected metric aggregate.  All
+Sample failures are excluded only from the affected metric aggregate. All
 failures remain explicit in ``failed_samples.csv``.
+
+Device semantics:
+- ``--device cuda:N`` means physical GPU N at this entry point;
+- metric subprocesses are launched with ``CUDA_VISIBLE_DEVICES=N`` and receive
+  logical ``cuda:0`` so nested PyTorch/TensorFlow subprocesses stay on that GPU;
+- ``--device cpu`` hides CUDA from all metric subprocesses.
 
 Status meanings:
 - complete: every eligible sample succeeded for every requested metric.
@@ -82,7 +88,51 @@ def _to_text(value):
     return str(value)
 
 
-def _run(cmd, *, cwd=None, timeout: int | None = 7200):
+def _device_context(device: str) -> tuple[str, dict[str, str], dict[str, Any]]:
+    """Return logical metric device, isolated subprocess env and audit metadata.
+
+    ``cuda:N`` is interpreted as physical GPU N. The child only sees that GPU,
+    therefore every metric receives logical ``cuda:0``. This also constrains
+    nested subprocesses such as SyncNet's S3FD face tracker and TensorFlow FVD.
+    """
+    requested = str(device or "cuda:0").strip().lower()
+    env = os.environ.copy()
+    env.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
+
+    if requested == "cpu":
+        env["CUDA_VISIBLE_DEVICES"] = ""
+        return "cpu", env, {
+            "requested": requested,
+            "effective": "cpu",
+            "cuda_visible_devices": "",
+        }
+
+    if requested in {"cuda", "gpu"}:
+        # Respect an already constrained parent environment. If it is not
+        # constrained, logical cuda:0 means the first CUDA device as usual.
+        visible = env.get("CUDA_VISIBLE_DEVICES")
+        return "cuda:0", env, {
+            "requested": requested,
+            "effective": "cuda:0",
+            "cuda_visible_devices": visible,
+        }
+
+    match = re.fullmatch(r"(?:cuda|gpu):(\d+)", requested)
+    if not match:
+        raise ValueError(
+            f"invalid --device {device!r}; expected cpu, cuda, or cuda:N"
+        )
+    physical = match.group(1)
+    env["CUDA_VISIBLE_DEVICES"] = physical
+    return "cuda:0", env, {
+        "requested": requested,
+        "effective": "cuda:0",
+        "physical_gpu": int(physical),
+        "cuda_visible_devices": physical,
+    }
+
+
+def _run(cmd, *, cwd=None, timeout: int | None = 7200, env=None):
     t0 = time.time()
     try:
         p = subprocess.run(
@@ -91,6 +141,7 @@ def _run(cmd, *, cwd=None, timeout: int | None = 7200):
             capture_output=True,
             text=True,
             timeout=timeout,
+            env=env,
         )
         return {
             "rc": p.returncode,
@@ -229,6 +280,14 @@ def evaluate(samples: list[Sample], method: str, outdir: Path, metrics: list[str
     if expected_n < len(samples):
         raise ValueError(f"--expected-n {expected_n} is smaller than manifest size {len(samples)}")
 
+    metric_device, metric_env, device_info = _device_context(args.device)
+    visible = device_info.get("cuda_visible_devices")
+    print(
+        f"[paper-eval] device requested={args.device} effective={metric_device} "
+        f"CUDA_VISIBLE_DEVICES={visible!r}",
+        flush=True,
+    )
+
     details: dict[str, Any] = {}
     failures: list[dict[str, Any]] = _read_upstream_failures(args.upstream_failures)
     hard_errors: list[str] = []
@@ -245,9 +304,9 @@ def evaluate(samples: list[Sample], method: str, outdir: Path, metrics: list[str
         out = work / "lse.json"
         out.unlink(missing_ok=True)
         cmd = [args.lse_python, str(LSE_SCRIPT), "--filelist", str(fake_list),
-               "--output_json", str(out), "--device", args.device,
+               "--output_json", str(out), "--device", metric_device,
                "--min-track", str(args.lse_min_track)]
-        proc = _run(cmd, cwd=LSE_SCRIPT.parent, timeout=args.timeout)
+        proc = _run(cmd, cwd=LSE_SCRIPT.parent, timeout=args.timeout, env=metric_env)
         data, load_err = _load_json_if_present(out)
         if data is None:
             msg = f"LSE unavailable: {load_err}; rc={proc['rc']} {_proc_tail(proc)}"
@@ -274,10 +333,10 @@ def evaluate(samples: list[Sample], method: str, outdir: Path, metrics: list[str
         out = work / "fid.json"
         out.unlink(missing_ok=True)
         cmd = [args.eval_python, str(FID_SCRIPT), "--list1", str(gt_list), "--list2", str(fake_list),
-               "--output-json", str(out), "--device", args.device]
+               "--output-json", str(out), "--device", metric_device]
         if args.fid_frame_stride != 1:
             cmd += ["--frame-stride", str(args.fid_frame_stride)]
-        proc = _run(cmd, cwd=FID_SCRIPT.parent, timeout=args.timeout)
+        proc = _run(cmd, cwd=FID_SCRIPT.parent, timeout=args.timeout, env=metric_env)
         data, load_err = _load_json_if_present(out)
         if data is None:
             msg = f"FID unavailable: {load_err}; rc={proc['rc']} {_proc_tail(proc)}"
@@ -298,8 +357,9 @@ def evaluate(samples: list[Sample], method: str, outdir: Path, metrics: list[str
         out = work / "fvd.json"
         out.unlink(missing_ok=True)
         cmd = [args.fvd_python, str(FVD_SCRIPT), "--real_list", str(gt_list), "--fake_list", str(fake_list),
-               "--video_length", str(args.fvd_video_length), "--output_file", str(out)]
-        proc = _run(cmd, cwd=FVD_SCRIPT.parent, timeout=args.timeout)
+               "--video_length", str(args.fvd_video_length), "--output_file", str(out),
+               "--device", metric_device]
+        proc = _run(cmd, cwd=FVD_SCRIPT.parent, timeout=args.timeout, env=metric_env)
         data, load_err = _load_json_if_present(out)
         if data is None:
             msg = f"FVD unavailable: {load_err}; rc={proc['rc']} {_proc_tail(proc)}"
@@ -324,9 +384,9 @@ def evaluate(samples: list[Sample], method: str, outdir: Path, metrics: list[str
         out = work / "pairwise.json"
         out.unlink(missing_ok=True)
         cmd = [args.pairwise_python, str(PAIRWISE_SCRIPT), "--manifest", str(manifest),
-               "--output", str(out), "--device", args.device]
+               "--output", str(out), "--device", metric_device]
         pairwise_timeout = args.pairwise_timeout if args.pairwise_timeout > 0 else None
-        proc = _run(cmd, cwd=THIS_DIR, timeout=pairwise_timeout)
+        proc = _run(cmd, cwd=THIS_DIR, timeout=pairwise_timeout, env=metric_env)
         data, load_err = _load_json_if_present(out)
         if data is None:
             msg = f"Pairwise unavailable: {load_err}; rc={proc['rc']} {_proc_tail(proc)}"
@@ -376,8 +436,8 @@ def evaluate(samples: list[Sample], method: str, outdir: Path, metrics: list[str
         out.unlink(missing_ok=True)
         cmd = [args.eval_python, str(EMOTIEFF_SCRIPT), "--video_dir", str(emotion_stage),
                "--label_file", str(label_file), "--model", args.emotieff_model,
-               "--device", args.device, "--quiet", "--output", str(out)]
-        proc = _run(cmd, cwd=EMOTIEFF_SCRIPT.parent, timeout=args.timeout)
+               "--device", metric_device, "--quiet", "--output", str(out)]
+        proc = _run(cmd, cwd=EMOTIEFF_SCRIPT.parent, timeout=args.timeout, env=metric_env)
         data, load_err = _load_json_if_present(out)
         if data is None:
             msg = f"EmotiEff unavailable: {load_err}; rc={proc['rc']} {_proc_tail(proc)}"
@@ -416,9 +476,9 @@ def evaluate(samples: list[Sample], method: str, outdir: Path, metrics: list[str
         out = work / "dfer_clip.json"
         out.unlink(missing_ok=True)
         cmd = [args.eval_python, str(DFER_SCRIPT), "--video_dir", str(emotion_stage),
-               "--label_file", str(label_file), "--device", args.device,
+               "--label_file", str(label_file), "--device", metric_device,
                "--num_segments", str(args.dfer_segments), "--quiet", "--output", str(out)]
-        proc = _run(cmd, cwd=DFER_SCRIPT.parent, timeout=args.timeout)
+        proc = _run(cmd, cwd=DFER_SCRIPT.parent, timeout=args.timeout, env=metric_env)
         data, load_err = _load_json_if_present(out)
         if data is None:
             msg = f"DFER-CLIP unavailable: {load_err}; rc={proc['rc']} {_proc_tail(proc)}"
@@ -502,7 +562,11 @@ def evaluate(samples: list[Sample], method: str, outdir: Path, metrics: list[str
         "Protocol": PROTOCOL_VERSION,
         "Manifest-SHA256": manifest_fingerprint(
             samples, metrics,
-            context={"expected_n": expected_n, "upstream_failures": upstream_for_hash},
+            context={
+                "expected_n": expected_n,
+                "upstream_failures": upstream_for_hash,
+                "device": device_info,
+            },
         ),
     }
     report = {
@@ -511,6 +575,7 @@ def evaluate(samples: list[Sample], method: str, outdir: Path, metrics: list[str
         "status": status,
         "expected_n": expected_n,
         "evaluated_n": len(samples),
+        "device": device_info,
         "hard_errors": hard_errors,
         "errors": hard_errors,
         "failures": failures,
@@ -543,7 +608,10 @@ def parse_args():
     p.add_argument("--method", required=True)
     p.add_argument("--output-dir", required=True)
     p.add_argument("--metrics", nargs="+", default=list(PAPER_METRICS), choices=PAPER_METRICS)
-    p.add_argument("--device", default="cuda:0")
+    p.add_argument(
+        "--device", default="cuda:0",
+        help="Evaluation device. cuda:N selects physical GPU N and isolates all metric subprocesses to it; cpu disables CUDA.",
+    )
     p.add_argument("--eval-python", default=_python(DEFAULT_EVAL_PY))
     p.add_argument("--fvd-python", default=_python(DEFAULT_FVD_PY))
     p.add_argument("--lse-python", default=_python(DEFAULT_LSE_PY))
