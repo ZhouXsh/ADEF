@@ -12,6 +12,7 @@ from __future__ import absolute_import, division, print_function
 import argparse
 import json
 import os
+import re
 import sys
 import warnings
 from glob import glob
@@ -127,6 +128,24 @@ def embed_videos(video_array, sess, videos_ph, embedding_op):
     return np.concatenate(chunks, axis=0)[:n]
 
 
+def _tf_session_config(device):
+    """Restrict TensorFlow to the requested logical CUDA device, or CPU."""
+    raw = str(device or "cuda:0").strip().lower()
+    config = tf.ConfigProto()
+    config.gpu_options.allow_growth = True
+    if raw == "cpu":
+        config.device_count["GPU"] = 0
+        return config
+    if raw in ("cuda", "gpu"):
+        config.gpu_options.visible_device_list = "0"
+        return config
+    m = re.fullmatch(r"(?:cuda|gpu):(\d+)", raw)
+    if not m:
+        raise ValueError("--device must be cpu, cuda, or cuda:N")
+    config.gpu_options.visible_device_list = m.group(1)
+    return config
+
+
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     p.add_argument("--real_dir")
@@ -136,6 +155,8 @@ def parse_args():
     p.add_argument("--video_length", type=int, default=16)
     p.add_argument("--limit", type=int, default=None)
     p.add_argument("--output_file")
+    p.add_argument("--device", default="cuda:0",
+                   help="TensorFlow execution device: cpu, cuda, or cuda:N.")
     p.add_argument("--quiet", action="store_true")
     return p.parse_args()
 
@@ -154,12 +175,14 @@ def main():
     result = {
         "protocol": "official Google I3D dataset FVD",
         "fvd": None,
+        "device": args.device,
         "video_length": args.video_length,
         "i3d_batch_size": I3D_BATCH_SIZE,
         "failures": [],
         "per_video": [],
     }
     try:
+        session_config = _tf_session_config(args.device)
         if bool(args.real_list) != bool(args.fake_list):
             raise ValueError("--real_list and --fake_list must be supplied together")
         if args.real_list:
@@ -228,7 +251,7 @@ def main():
             real_emb_ph = tf.placeholder(tf.float32, [None, EMBEDDING_DIM], name="real_emb_ph")
             fake_emb_ph = tf.placeholder(tf.float32, [None, EMBEDDING_DIM], name="fake_emb_ph")
             fvd_tensor = fvd.calculate_fvd(real_emb_ph, fake_emb_ph)
-            with tf.Session() as sess:
+            with tf.Session(config=session_config) as sess:
                 sess.run(tf.global_variables_initializer())
                 sess.run(tf.tables_initializer())
                 real_emb = embed_videos(real_arr, sess, videos_ph, embedding_op)
