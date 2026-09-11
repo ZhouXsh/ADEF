@@ -6,6 +6,9 @@ For paired list mode, each real/fake video pair is materialized independently.
 If either side cannot be decoded, both sides of that sample are excluded so the
 final distributions use the same successful sample subset. FID is still
 computed exactly once over all pooled frames via official pytorch-fid.
+
+The output additionally records, per video pair, how many real/fake frames were
+materialized and whether that pair participated in the final dataset-level FID.
 """
 from __future__ import annotations
 
@@ -119,25 +122,41 @@ def _materialize_paired_lists(real_videos: list[str], fake_videos: list[str], te
     real_dir.mkdir(parents=True, exist_ok=True)
     fake_dir.mkdir(parents=True, exist_ok=True)
     failures = []
+    per_video = []
     n_success = n_real_frames = n_fake_frames = 0
     for i, (real, fake) in enumerate(zip(real_videos, fake_videos)):
         prefix = f"v{i:06d}"
+        row = {
+            "index": i,
+            "real": real,
+            "fake": fake,
+            "real_frames": None,
+            "fake_frames": None,
+            "included": False,
+            "error": None,
+        }
         try:
             nr = _extract_video_frames(real, real_dir, prefix, frame_stride, max_frames, resize)
+            row["real_frames"] = nr
             nf = _extract_video_frames(fake, fake_dir, prefix, frame_stride, max_frames, resize)
+            row["fake_frames"] = nf
         except Exception as exc:
             _cleanup_prefix(real_dir, prefix)
             _cleanup_prefix(fake_dir, prefix)
-            failures.append({"index": i, "real": real, "fake": fake,
-                             "error": f"{type(exc).__name__}: {exc}"})
+            error = f"{type(exc).__name__}: {exc}"
+            row["error"] = error
+            failures.append({"index": i, "real": real, "fake": fake, "error": error})
+            per_video.append(row)
             continue
+        row["included"] = True
+        per_video.append(row)
         n_success += 1
         n_real_frames += nr
         n_fake_frames += nf
     return str(real_dir), str(fake_dir), {
         "n_total": len(real_videos), "n_success": n_success,
         "n_real_frames": n_real_frames, "n_fake_frames": n_fake_frames,
-        "failures": failures,
+        "failures": failures, "per_video": per_video,
     }
 
 
@@ -216,7 +235,8 @@ def main() -> int:
         else:
             real_path, real_meta = _resolve_side(args.path1, temp_root, "real", args.frame_stride, args.max_frames, args.resize)
             fake_path, fake_meta = _resolve_side(args.path2, temp_root, "fake", args.frame_stride, args.max_frames, args.resize)
-            result.update({"real": real_meta, "fake": fake_meta, "n_total": None, "n_success": None, "failures": []})
+            result.update({"real": real_meta, "fake": fake_meta, "n_total": None, "n_success": None,
+                           "failures": [], "per_video": []})
 
         real_frames = result["real"].get("n_frames")
         fake_frames = result["fake"].get("n_frames")
