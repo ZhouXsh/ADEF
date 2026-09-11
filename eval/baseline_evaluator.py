@@ -45,7 +45,7 @@ def parse_args():
     p.add_argument("--metrics", nargs="+", default=None,
                    choices=["lse", "fid", "fvd", "pairwise", "emotiefflib", "dfer_clip"])
     p.add_argument("--device", default="cuda:0")
-    p.add_argument("--timeout", type=int, default=7200,
+    p.add_argument("--timeout", type=int, default=43200,
                    help="Per-metric subprocess timeout passed to paper_evaluator.py.")
     p.add_argument("--scenario", default="paper_eval",
                    help="Scenario used when reconstructing expected baseline filenames.")

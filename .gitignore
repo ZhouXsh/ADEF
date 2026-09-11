@@ -248,6 +248,7 @@ generate.py
 /eval/RESULT-0907/
 /eval/eval_reports/
 /eval/reports/test/
+/eval/tmp/
 
 # evaluation_eat outputs / logs / intermediate results
 /eval/evaluation_eat/outputs/

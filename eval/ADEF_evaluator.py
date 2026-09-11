@@ -258,7 +258,7 @@ def parse_args():
     p.add_argument("--metrics", nargs="+", default=None,
                    choices=["lse", "fid", "fvd", "pairwise", "emotiefflib", "dfer_clip"])
     p.add_argument("--device", default="cuda:0")
-    p.add_argument("--timeout", type=int, default=7200)
+    p.add_argument("--timeout", type=int, default=43200)
     p.add_argument("--allow-partial", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--resume", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--eat-device", default=None, help=argparse.SUPPRESS)

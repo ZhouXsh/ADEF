@@ -217,7 +217,7 @@ def parse_args():
                    choices=["lse", "fid", "fvd", "pairwise", "emotiefflib", "dfer_clip"])
     p.add_argument("--output-root", default=str(DEFAULT_RESULT_ROOT))
     p.add_argument("--device", default="cuda:0")
-    p.add_argument("--timeout", type=int, default=7200)
+    p.add_argument("--timeout", type=int, default=43200)
     p.add_argument("--scenario", default="paper_eval")
     p.add_argument("--generation-only", action="store_true")
     p.add_argument("--allow-partial", action="store_true", help=argparse.SUPPRESS)
