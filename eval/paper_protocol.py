@@ -11,7 +11,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterable, Optional, Sequence
 
-PROTOCOL_VERSION = "ADEF-paper-eval-v3"
+PROTOCOL_VERSION = "ADEF-paper-eval-v4"
 
 EMOTION_ALIASES = {
     "ang": "anger", "angry": "anger", "anger": "anger",
