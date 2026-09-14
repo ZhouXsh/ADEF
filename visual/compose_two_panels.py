@@ -14,9 +14,9 @@ from PIL import Image
 
 
 # ========================= 只需要修改这里 =========================
-LEFT_PANEL = "visual/results/method_comparison.png"
+LEFT_PANEL = "visual/results/M003_front_angry_level_3_015.png"
 RIGHT_PANEL = "visual/results/emotion_comparison.png"
-OUTPUT_PATH = "visual/results/combined_comparison.png"
+OUTPUT_PATH = "visual/results/combined_M003_front_angry_level_3_015.png"
 GAP = 24
 OUTER_PADDING = 8
 # ================================================================

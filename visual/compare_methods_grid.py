@@ -12,15 +12,20 @@ from collections import OrderedDict
 
 from grid_utils import build_video_grid
 
+base_path = '/home/Zhouxishi/VirtualMan_proj/ADEFv4_visual/ADEF_remake'
+video_name = 'M003_front_angry_level_3_015_M003_front_angry_level_3_015_angry.mp4'
 
 # ========================= 只需要修改这里 =========================
 METHODS = OrderedDict(
     [
-        ("GT", "/path/to/ground_truth.mp4"),
-        ("Wav2Lip", "/path/to/wav2lip.mp4"),
-        ("EAMM", "/path/to/eamm.mp4"),
-        ("EDTalk", "/path/to/edtalk.mp4"),
-        ("ADEF (Ours)", "/path/to/adef.mp4"),
+        ("GT", "/home/Zhouxishi/VirtualMan_proj/dataset/MEAD11/videos/M003/front/angry/level_3/M003_front_angry_level_3_015.mp4"),
+        ("Wav2Lip", f"{base_path}/wav2lip/{video_name}"),
+        ("KDTalker", f"{base_path}/kdtalker/{video_name}"),
+        ("FlashHead", f"{base_path}/SoulX-FlashHead-Pro/{video_name}"),
+        ("EAT", f"{base_path}/eat_code/{video_name}"),
+        ("DICE-Talk", f"{base_path}/DICE_TALK_MEAD_FULL/{video_name}"),
+        ("Fantasy-Talking", f"{base_path}/Fantasy_Subset/{video_name}"),
+        ("HSA-Motion (Ours)", f"{base_path}/20260909_fusion_balanced_decay_ema_20cfg_full/{video_name}"),
     ]
 )
 

@@ -12,20 +12,24 @@ from collections import OrderedDict
 
 from grid_utils import build_video_grid
 
+base_path = '/home/Zhouxishi/VirtualMan_proj/ADEFv4_visual/ADEF_remake/20260806_emotion_dit_Unification_bs64_lexp1（效果好）'
 
 # ========================= 只需要修改这里 =========================
 EMOTIONS = OrderedDict(
     [
-        ("Neutral", "/path/to/neutral.mp4"),
-        ("Happy", "/path/to/happy.mp4"),
-        ("Angry", "/path/to/angry.mp4"),
-        ("Surprised", "/path/to/surprised.mp4"),
-        ("Sad", "/path/to/sad.mp4"),
+        ("Angry", f"{base_path}/白人男_M003_front_angry_level_3_001_angry.mp4"),
+        ("Contempt", f"{base_path}/白人男_M003_front_contempt_level_3_001_contempt.mp4"),
+        ("Disgusted", f"{base_path}/白人男_M003_front_disgusted_level_3_001_disgusted.mp4"),
+        ("Surprised", f"{base_path}/白人男_M003_front_fear_level_3_001_fear.mp4"),
+        ("Happy", f"{base_path}/白人男_M003_front_happy_level_3_001_happy.mp4"),
+        ("Neutral", f"{base_path}/白人男_M003_front_neutral_level_1_001_neutral.mp4"),
+        ("Sad", f"{base_path}/白人男_M003_front_sad_level_3_001_sad.mp4"),
+        ("Surprised", f"{base_path}/白人男_M003_front_surprised_level_3_001_surprised.mp4"),
     ]
 )
 
 OUTPUT_PATH = "visual/results/emotion_comparison.png"
-PANEL_TITLE = "ADEF Emotion Control"
+PANEL_TITLE = "HSA-Motion(Ours) Emotion Control"
 NUM_SAMPLES = 5
 START_RATIO = 0.10
 END_RATIO = 0.90
