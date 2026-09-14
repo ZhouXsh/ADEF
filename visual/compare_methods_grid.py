@@ -1,0 +1,52 @@
+"""
+使用方法（不同方法、相同情感对比图 / 左面板）：
+1. 修改下面 METHODS 中每个方法对应的视频路径；这些视频应尽量使用同一 source、同一音频和同一目标情感。
+2. 修改 OUTPUT_PATH、NUM_SAMPLES 等参数；默认 LABEL_AXIS="x"，严格对应 visual/readme.md：横轴是方法名，纵轴是采样位置。
+3. 在仓库根目录执行：python visual/compare_methods_grid.py
+4. 输出为无损 PNG。若想排成你给出的参考图那样“方法在纵轴、时间在横轴”，只需把 LABEL_AXIS 改为 "y"。
+
+说明：脚本会先取所有输入视频的共同有效时长，再在同一组绝对时间戳上间隔采样，因此不同 FPS 的视频也能尽量做到同一时刻对齐。
+"""
+
+from collections import OrderedDict
+
+from grid_utils import build_video_grid
+
+
+# ========================= 只需要修改这里 =========================
+METHODS = OrderedDict(
+    [
+        ("GT", "/path/to/ground_truth.mp4"),
+        ("Wav2Lip", "/path/to/wav2lip.mp4"),
+        ("EAMM", "/path/to/eamm.mp4"),
+        ("EDTalk", "/path/to/edtalk.mp4"),
+        ("ADEF (Ours)", "/path/to/adef.mp4"),
+    ]
+)
+
+OUTPUT_PATH = "visual/results/method_comparison.png"
+PANEL_TITLE = "Same Emotion Comparison"
+NUM_SAMPLES = 5
+START_RATIO = 0.10
+END_RATIO = 0.90
+CELL_WIDTH = 256
+CELL_HEIGHT = 256
+LABEL_AXIS = "x"  # "x" 符合 readme；"y" 更接近你给出的参考图布局
+FONT_PATH = None  # 中文标签可指定中文字体，例如 /usr/share/fonts/.../NotoSansCJK-Regular.ttc
+# ================================================================
+
+
+if __name__ == "__main__":
+    output = build_video_grid(
+        METHODS,
+        OUTPUT_PATH,
+        num_samples=NUM_SAMPLES,
+        start_ratio=START_RATIO,
+        end_ratio=END_RATIO,
+        cell_width=CELL_WIDTH,
+        cell_height=CELL_HEIGHT,
+        label_axis=LABEL_AXIS,
+        font_path=FONT_PATH,
+        panel_title=PANEL_TITLE,
+    )
+    print(f"Saved method-comparison grid to: {output}")
